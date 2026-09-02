@@ -11,7 +11,7 @@ const STARTING_MODELS = [
   ["ember-1", "Ember", "#d58359", 74, 30],
   ["ember-2", "Ashen", "#f0b16e", 64, 52],
   ["ember-3", "Kindler", "#a85942", 77, 68],
-].map(([id, name, color, x, y]) => ({ id, name, color, x, y }));
+].map(([id, name, color, x, y]) => ({ id, name, color, rotation: 0, x, y }));
 
 const MIME_TYPES = {
   ".css": "text/css; charset=utf-8",
@@ -52,12 +52,21 @@ export class RoomStore {
     }, this.roomTtlMs);
   }
 
-  move(roomId, { id, x, y }) {
+  move(roomId, { id, rotation, x, y }) {
     if (typeof id !== "string" || !Number.isFinite(x) || !Number.isFinite(y)) return false;
     const model = this.get(roomId).models.find((entry) => entry.id === id);
     if (!model) return false;
     model.x = Math.max(2, Math.min(98, x));
     model.y = Math.max(2, Math.min(98, y));
+    if (Number.isFinite(rotation)) model.rotation = ((rotation % 360) + 360) % 360;
+    return true;
+  }
+
+  rotate(roomId, { id, rotation }) {
+    if (typeof id !== "string" || !Number.isFinite(rotation)) return false;
+    const model = this.get(roomId).models.find((entry) => entry.id === id);
+    if (!model) return false;
+    model.rotation = ((rotation % 360) + 360) % 360;
     return true;
   }
 }
@@ -156,7 +165,8 @@ export function createMistboardServer({ publicDirectory = join(process.cwd(), "p
       message(raw) {
         try {
           const message = JSON.parse(raw);
-          if (message.type !== "move" || !store.move(roomId, message)) return;
+          const changed = message.type === "move" ? store.move(roomId, message) : message.type === "rotate" ? store.rotate(roomId, message) : false;
+          if (!changed) return;
           broadcast(roomId, { type: "state", models: store.get(roomId).models });
         } catch {
           // Invalid client messages do not affect the room.

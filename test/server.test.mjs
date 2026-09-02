@@ -18,9 +18,23 @@ test("rooms start with independent board state", () => {
 test("movement is validated and constrained to the board", () => {
   const store = new RoomStore();
   assert.equal(store.move("room", { id: "iron-1", x: -4, y: 300 }), true);
-  assert.deepEqual(store.get("room").models[0], { id: "iron-1", name: "Ironclad", color: "#8da3b8", x: 2, y: 98 });
+  assert.deepEqual(store.get("room").models[0], { id: "iron-1", name: "Ironclad", color: "#8da3b8", rotation: 0, x: 2, y: 98 });
   assert.equal(store.move("room", { id: "unknown", x: 30, y: 30 }), false);
   assert.equal(store.move("room", { id: "iron-1", x: "bad", y: 30 }), false);
+});
+
+test("movement retains a model's facing", () => {
+  const store = new RoomStore();
+  store.rotate("room", { id: "iron-1", rotation: 90 });
+  store.move("room", { id: "iron-1", x: 30, y: 30 });
+  assert.equal(store.get("room").models[0].rotation, 90);
+});
+
+test("rotation is validated and normalized", () => {
+  const store = new RoomStore();
+  assert.equal(store.rotate("room", { id: "iron-1", rotation: -15 }), true);
+  assert.equal(store.get("room").models[0].rotation, 345);
+  assert.equal(store.rotate("room", { id: "iron-1", rotation: "bad" }), false);
 });
 
 test("leaving the last player retains the room until its expiry", () => {
