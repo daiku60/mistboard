@@ -2,18 +2,174 @@ import { createHash, randomUUID } from "node:crypto";
 import { createReadStream, existsSync } from "node:fs";
 import { createServer } from "node:http";
 import { extname, join, normalize } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const port = Number(process.env.PORT ?? 3000);
-const publicDirectory = join(process.cwd(), "public");
-const rooms = new Map();
-const clients = new Set();
-const startingModels = [["iron-1", "Ironclad", "#8da3b8", 26, 31], ["iron-2", "Sparrow", "#c4d3df", 38, 48], ["iron-3", "Wayfarer", "#728ca7", 24, 66], ["ember-1", "Ember", "#d58359", 74, 30], ["ember-2", "Ashen", "#f0b16e", 64, 52], ["ember-3", "Kindler", "#a85942", 77, 68]].map(([id, name, color, x, y]) => ({ id, name, color, x, y }));
-function getRoom(id) { if (!rooms.has(id)) rooms.set(id, structuredClone(startingModels)); return rooms.get(id); }
-function send(socket, value) { if (socket.destroyed || !socket.writable) return; const data = Buffer.from(JSON.stringify(value)); const header = data.length < 126 ? Buffer.from([129, data.length]) : Buffer.from([129, 126, data.length >> 8, data.length & 255]); socket.write(Buffer.concat([header, data])); }
-function broadcast(roomId, value) { for (const client of clients) if (client.roomId === roomId) send(client.socket, value); }
-function playerCount(roomId) { return [...clients].filter((client) => client.roomId === roomId).length; }
-function parseFrames(socket, onMessage) { let input = Buffer.alloc(0); socket.on("data", (chunk) => { input = Buffer.concat([input, chunk]); while (input.length >= 6) { const length = input[1] & 127; if (length > 125 || input.length < length + 6) return; const mask = input.subarray(2, 6); const data = input.subarray(6, length + 6); for (let i = 0; i < data.length; i += 1) data[i] ^= mask[i % 4]; input = input.subarray(length + 6); onMessage(data.toString()); } }); }
-const mime = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8" };
-const server = createServer((request, response) => { const pathname = request.url.split("?")[0]; const path = normalize(join(publicDirectory, pathname === "/" ? "index.html" : pathname)); if (!path.startsWith(publicDirectory) || !existsSync(path)) return response.writeHead(404).end("Not found"); response.writeHead(200, { "content-type": mime[extname(path)] ?? "application/octet-stream" }); createReadStream(path).pipe(response); });
-server.on("upgrade", (request, socket) => { const roomId = new URL(request.url, `http://${request.headers.host}`).searchParams.get("room")?.replace(/[^a-zA-Z0-9-]/g, "").slice(0, 40) || randomUUID(); const key = request.headers["sec-websocket-key"]; if (!key) return socket.destroy(); const accept = createHash("sha1").update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest("base64"); socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`); const client = { socket, roomId }; clients.add(client); socket.on("error", () => clients.delete(client)); send(socket, { type: "room", roomId, models: getRoom(roomId) }); broadcast(roomId, { type: "presence", count: playerCount(roomId) }); parseFrames(socket, (raw) => { try { const message = JSON.parse(raw); const model = getRoom(roomId).find((entry) => entry.id === message.id); if (message.type !== "move" || !model || !Number.isFinite(message.x) || !Number.isFinite(message.y)) return; model.x = Math.max(2, Math.min(98, message.x)); model.y = Math.max(2, Math.min(98, message.y)); broadcast(roomId, { type: "state", models: getRoom(roomId) }); } catch {} }); socket.on("close", () => { clients.delete(client); broadcast(roomId, { type: "presence", count: playerCount(roomId) }); }); });
-server.listen(port, () => console.log(`Mistboard is running at http://localhost:${port}`));
+const STARTING_MODELS = [
+  ["iron-1", "Ironclad", "#8da3b8", 26, 31],
+  ["iron-2", "Sparrow", "#c4d3df", 38, 48],
+  ["iron-3", "Wayfarer", "#728ca7", 24, 66],
+  ["ember-1", "Ember", "#d58359", 74, 30],
+  ["ember-2", "Ashen", "#f0b16e", 64, 52],
+  ["ember-3", "Kindler", "#a85942", 77, 68],
+].map(([id, name, color, x, y]) => ({ id, name, color, x, y }));
+
+const MIME_TYPES = {
+  ".css": "text/css; charset=utf-8",
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".svg": "image/svg+xml",
+};
+
+export class RoomStore {
+  constructor({ roomTtlMs = 15 * 60 * 1000 } = {}) {
+    this.roomTtlMs = roomTtlMs;
+    this.rooms = new Map();
+  }
+
+  get(roomId) {
+    let room = this.rooms.get(roomId);
+    if (!room) {
+      room = { clients: new Set(), expiryTimer: null, models: structuredClone(STARTING_MODELS) };
+      this.rooms.set(roomId, room);
+    }
+    return room;
+  }
+
+  join(roomId, client) {
+    const room = this.get(roomId);
+    if (room.expiryTimer) clearTimeout(room.expiryTimer);
+    room.expiryTimer = null;
+    room.clients.add(client);
+    return room;
+  }
+
+  leave(roomId, client) {
+    const room = this.rooms.get(roomId);
+    if (!room || !room.clients.delete(client) || room.clients.size > 0 || room.expiryTimer) return;
+    room.expiryTimer = setTimeout(() => {
+      const current = this.rooms.get(roomId);
+      if (current && current.clients.size === 0) this.rooms.delete(roomId);
+    }, this.roomTtlMs);
+  }
+
+  move(roomId, { id, x, y }) {
+    if (typeof id !== "string" || !Number.isFinite(x) || !Number.isFinite(y)) return false;
+    const model = this.get(roomId).models.find((entry) => entry.id === id);
+    if (!model) return false;
+    model.x = Math.max(2, Math.min(98, x));
+    model.y = Math.max(2, Math.min(98, y));
+    return true;
+  }
+}
+
+function frame(payload, opcode = 1) {
+  const data = Buffer.isBuffer(payload) ? payload : Buffer.from(JSON.stringify(payload));
+  if (data.length < 126) return Buffer.concat([Buffer.from([0x80 | opcode, data.length]), data]);
+  if (data.length < 65_536) return Buffer.concat([Buffer.from([0x80 | opcode, 126, data.length >> 8, data.length & 255]), data]);
+  throw new Error("WebSocket payload is too large");
+}
+
+function send(socket, payload, opcode = 1) {
+  if (socket.destroyed || !socket.writable) return false;
+  try {
+    socket.write(frame(payload, opcode));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function readFrames(socket, handlers) {
+  let input = Buffer.alloc(0);
+  socket.on("data", (chunk) => {
+    input = Buffer.concat([input, chunk]);
+    while (input.length >= 2) {
+      const first = input[0];
+      const second = input[1];
+      const masked = Boolean(second & 0x80);
+      let length = second & 0x7f;
+      let offset = 2;
+      if (!masked) return socket.destroy();
+      if (length === 126) {
+        if (input.length < 4) return;
+        length = input.readUInt16BE(2);
+        offset = 4;
+      } else if (length === 127) return socket.destroy();
+      const total = offset + 4 + length;
+      if (input.length < total) return;
+      const mask = input.subarray(offset, offset + 4);
+      const data = Buffer.from(input.subarray(offset + 4, total));
+      for (let index = 0; index < data.length; index += 1) data[index] ^= mask[index % 4];
+      input = input.subarray(total);
+
+      const opcode = first & 0x0f;
+      if (opcode === 8) return socket.end();
+      if (opcode === 9) send(socket, data, 10);
+      if (opcode === 1) handlers.message(data.toString("utf8"));
+    }
+  });
+}
+
+export function createMistboardServer({ publicDirectory = join(process.cwd(), "public"), roomTtlMs } = {}) {
+  const store = new RoomStore({ roomTtlMs });
+  const clients = new Set();
+
+  function count(roomId) {
+    return store.get(roomId).clients.size;
+  }
+
+  function broadcast(roomId, message) {
+    for (const client of store.get(roomId).clients) send(client.socket, message);
+  }
+
+  function removeClient(client) {
+    if (!clients.delete(client)) return;
+    store.leave(client.roomId, client);
+    broadcast(client.roomId, { type: "presence", count: count(client.roomId) });
+  }
+
+  const server = createServer((request, response) => {
+    const pathname = request.url?.split("?")[0] ?? "/";
+    const filePath = normalize(join(publicDirectory, pathname === "/" ? "index.html" : pathname));
+    if (!filePath.startsWith(publicDirectory) || !existsSync(filePath)) return response.writeHead(404).end("Not found");
+    response.writeHead(200, { "content-type": MIME_TYPES[extname(filePath)] ?? "application/octet-stream" });
+    const file = createReadStream(filePath);
+    file.on("error", () => response.end());
+    file.pipe(response);
+  });
+
+  server.on("upgrade", (request, socket) => {
+    const roomId = new URL(request.url, `http://${request.headers.host}`).searchParams.get("room")?.replace(/[^a-zA-Z0-9-]/g, "").slice(0, 40) || randomUUID();
+    const key = request.headers["sec-websocket-key"];
+    if (!key) return socket.destroy();
+    const accept = createHash("sha1").update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest("base64");
+    socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
+
+    const client = { roomId, socket };
+    clients.add(client);
+    const room = store.join(roomId, client);
+    send(socket, { type: "room", roomId, models: room.models });
+    broadcast(roomId, { type: "presence", count: count(roomId) });
+    socket.once("close", () => removeClient(client));
+    socket.once("error", () => removeClient(client));
+    readFrames(socket, {
+      message(raw) {
+        try {
+          const message = JSON.parse(raw);
+          if (message.type !== "move" || !store.move(roomId, message)) return;
+          broadcast(roomId, { type: "state", models: store.get(roomId).models });
+        } catch {
+          // Invalid client messages do not affect the room.
+        }
+      },
+    });
+  });
+
+  return { server, store };
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const { server } = createMistboardServer();
+  const port = Number(process.env.PORT ?? 3000);
+  server.listen(port, () => console.log(`Mistboard is running at http://localhost:${port}`));
+}
