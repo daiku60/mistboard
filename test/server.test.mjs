@@ -5,7 +5,7 @@ import { RoomStore } from "../server.mjs";
 
 test("Mistboard exposes a dependency-free server command", async () => {
   const config = JSON.parse(await readFile("package.json", "utf8"));
-  assert.equal(config.scripts.dev, "node server.mjs");
+  assert.equal(config.scripts.dev, "npm run build:controls && node server.mjs");
 });
 
 test("rooms start with independent board state", () => {

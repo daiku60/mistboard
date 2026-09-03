@@ -6,9 +6,20 @@
     "node": ">=22.13.0"
   },
   "scripts": {
-    "dev": "node server.mjs",
+    "dev": "npm run build:controls && node server.mjs",
+    "build:controls": "vite build",
     "start": "node server.mjs",
     "test": "node --test test/server.test.mjs"
   },
-  "type": "module"
+  "type": "module",
+  "dependencies": {
+    "@radix-ui/react-popover": "^1.1.23",
+    "lucide-react": "^1.39.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "vite": "^8.2.2"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.1.1"
+  }
 }
