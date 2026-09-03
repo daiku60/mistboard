@@ -4,3 +4,4 @@
 .model{font-size:clamp(10px,1.5vw,16px)}
 .model:after{left:50%;top:8%;width:12%;height:42%;transform:translateX(-50%) rotate(var(--rotation));transform-origin:50% 100%}
 .charge-lane{position:absolute;z-index:1;border:1px solid #f0dc88;background:#f0dc8838;pointer-events:none}
+.board-canvas{width:min(100%,70dvh);height:min(100%,70dvh);aspect-ratio:1;transform-origin:center;overflow:hidden}.pixi-canvas{display:block;width:100%;height:100%;touch-action:none}.board-canvas.measuring .pixi-canvas{cursor:crosshair}
