@@ -2,3 +2,4 @@
 .model:after{content:"";position:absolute;left:50%;top:4px;width:4px;height:15px;background:#17251b;transform:translateX(-50%) rotate(var(--rotation));transform-origin:50% 25px}.ruler{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}.ruler line{stroke:#f0dc88;stroke-width:.4}.ruler-label{position:absolute;transform:translate(-50%,-50%);background:#17251b;color:#f0dc88;padding:3px}.measuring{cursor:crosshair}
 .control.active{background:#f0dc88;box-shadow:0 0 12px #f0dc8894}.board.measuring,.board.measuring *{cursor:crosshair!important}
 .model{font-size:clamp(10px,1.5vw,16px)}
+.model:after{left:50%;top:8%;width:12%;height:42%;transform:translateX(-50%) rotate(var(--rotation));transform-origin:50% 100%}

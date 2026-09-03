@@ -11,7 +11,7 @@ const STARTING_MODELS = [
   ["ember-1", "Ember", "#d58359", 74, 30],
   ["ember-2", "Ashen", "#f0b16e", 64, 52],
   ["ember-3", "Kindler", "#a85942", 77, 68],
-].map(([id, name, color, x, y]) => ({ id, name, color, rotation: 0, x, y }));
+].map(([id, name, color, x, y], index) => ({ baseMm: [30, 40, 50, 30, 40, 50][index], id, name, color, rotation: 0, x, y }));
 
 const MIME_TYPES = {
   ".css": "text/css; charset=utf-8",
@@ -60,6 +60,13 @@ export class RoomStore {
     model.y = Math.max(2, Math.min(98, y));
     if (Number.isFinite(rotation)) model.rotation = ((rotation % 360) + 360) % 360;
     return true;
+  }
+
+  setBase(roomId, { id, baseMm }) {
+    if (![30, 40, 50].includes(baseMm)) return false;
+    const model = this.get(roomId).models.find((entry) => entry.id === id);
+    if (!model) return false;
+    model.baseMm = baseMm; return true;
   }
 
   rotate(roomId, { id, rotation }) {
@@ -165,7 +172,7 @@ export function createMistboardServer({ publicDirectory = join(process.cwd(), "p
       message(raw) {
         try {
           const message = JSON.parse(raw);
-          const changed = message.type === "move" ? store.move(roomId, message) : message.type === "rotate" ? store.rotate(roomId, message) : false;
+          const changed = message.type === "move" ? store.move(roomId, message) : message.type === "rotate" ? store.rotate(roomId, message) : message.type === "base" ? store.setBase(roomId, message) : false;
           if (!changed) return;
           broadcast(roomId, { type: "state", models: store.get(roomId).models });
         } catch {

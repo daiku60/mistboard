@@ -18,7 +18,7 @@ test("rooms start with independent board state", () => {
 test("movement is validated and constrained to the board", () => {
   const store = new RoomStore();
   assert.equal(store.move("room", { id: "iron-1", x: -4, y: 300 }), true);
-  assert.deepEqual(store.get("room").models[0], { id: "iron-1", name: "Ironclad", color: "#8da3b8", rotation: 0, x: 2, y: 98 });
+  assert.deepEqual(store.get("room").models[0], { baseMm: 30, id: "iron-1", name: "Ironclad", color: "#8da3b8", rotation: 0, x: 2, y: 98 });
   assert.equal(store.move("room", { id: "unknown", x: 30, y: 30 }), false);
   assert.equal(store.move("room", { id: "iron-1", x: "bad", y: 30 }), false);
 });
