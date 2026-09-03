@@ -3,3 +3,4 @@
 .control.active{background:#f0dc88;box-shadow:0 0 12px #f0dc8894}.board.measuring,.board.measuring *{cursor:crosshair!important}
 .model{font-size:clamp(10px,1.5vw,16px)}
 .model:after{left:50%;top:8%;width:12%;height:42%;transform:translateX(-50%) rotate(var(--rotation));transform-origin:50% 100%}
+.charge-lane{position:absolute;z-index:1;border:1px solid #f0dc88;background:#f0dc8838;pointer-events:none}
