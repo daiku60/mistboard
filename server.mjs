@@ -149,6 +149,71 @@ export class RoomStore {
     room.rotationCharges = next;
     return true;
   }
+
+  setBoard(roomId, { board }) {
+    if (!board || typeof board !== "object") return false;
+    const { models, circles, chargeIds, rotationCharges } = board;
+    if (!Array.isArray(models)) return false;
+    const room = this.get(roomId),
+      expectedIds = new Set(room.models.map((model) => model.id));
+    if (models.length !== expectedIds.size) return false;
+    const receivedIds = new Set(models.map((model) => model?.id));
+    if (receivedIds.size !== expectedIds.size) return false;
+    for (const model of models) {
+      if (
+        !expectedIds.has(model.id) ||
+        !Number.isFinite(model.x) ||
+        !Number.isFinite(model.y) ||
+        model.x < 2 ||
+        model.x > 98 ||
+        model.y < 2 ||
+        model.y > 98 ||
+        !Number.isFinite(model.rotation) ||
+        ![30, 40, 50].includes(model.baseMm)
+      )
+        return false;
+    }
+    if (
+      !circles ||
+      Array.isArray(circles) ||
+      typeof circles !== "object" ||
+      !Array.isArray(chargeIds) ||
+      !Array.isArray(rotationCharges)
+    )
+      return false;
+    for (const [id, ranges] of Object.entries(circles)) {
+      if (
+        !expectedIds.has(id) ||
+        !Array.isArray(ranges) ||
+        ranges.some(
+          (range) => !Number.isInteger(range) || range < 1 || range > 20,
+        )
+      )
+        return false;
+    }
+    if (chargeIds.some((id) => typeof id !== "string" || !expectedIds.has(id)))
+      return false;
+    const rotationChargeIds = new Set();
+    for (const charge of rotationCharges) {
+      if (
+        !charge ||
+        typeof charge.id !== "string" ||
+        !expectedIds.has(charge.id) ||
+        !Number.isFinite(charge.length) ||
+        rotationChargeIds.has(charge.id)
+      )
+        return false;
+      rotationChargeIds.add(charge.id);
+    }
+    room.models = structuredClone(models);
+    room.circles = structuredClone(circles);
+    room.chargeIds = [...new Set(chargeIds)];
+    room.rotationCharges = rotationCharges.map(({ id, length }) => ({
+      id,
+      length: Math.max(0, Math.min(72, length)),
+    }));
+    return true;
+  }
 }
 
 function frame(payload, opcode = 1) {
@@ -338,7 +403,9 @@ export function createMistboardServer({
                     ? store.setCircles(roomId, message)
                     : message.type === "chargeLanes"
                       ? store.setChargeLanes(roomId, message)
-                      : false;
+                      : message.type === "boardState"
+                        ? store.setBoard(roomId, message)
+                        : false;
           if (!changed) return;
           broadcast(roomId, {
             type: "state",

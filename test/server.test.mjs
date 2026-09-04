@@ -75,6 +75,31 @@ test("circles and charge lanes are shared room state", () => {
   assert.equal(store.setChargeLanes("room", { chargeIds: ["unknown"] }), false);
 });
 
+test("a complete board snapshot replaces the shared state", () => {
+  const store = new RoomStore();
+  const board = {
+    models: structuredClone(store.get("room").models),
+    circles: { "iron-1": [3] },
+    chargeIds: ["ember-1"],
+    rotationCharges: [{ id: "iron-1", length: 8 }],
+  };
+  board.models[0].x = 42;
+  board.models[0].rotation = 90;
+
+  assert.equal(store.setBoard("room", { board }), true);
+  assert.equal(store.get("room").models[0].x, 42);
+  assert.equal(store.get("room").models[0].rotation, 90);
+  assert.deepEqual(store.get("room").circles, { "iron-1": [3] });
+  assert.deepEqual(store.get("room").chargeIds, ["ember-1"]);
+  assert.deepEqual(store.get("room").rotationCharges, [
+    { id: "iron-1", length: 8 },
+  ]);
+
+  board.models[1].id = board.models[0].id;
+  assert.equal(store.setBoard("room", { board }), false);
+  assert.equal(store.get("room").models[0].x, 42);
+});
+
 test("leaving the last player retains the room until its expiry", () => {
   const store = new RoomStore({ roomTtlMs: 60_000 });
   const player = {};

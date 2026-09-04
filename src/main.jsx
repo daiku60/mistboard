@@ -65,6 +65,7 @@ function PixiBoard({
   onSelectionBox,
   onPreviewMove,
   onPreviewEnd,
+  onRotateStart,
   onRotatePreview,
   onRotate,
   onMeasure,
@@ -88,6 +89,7 @@ function PixiBoard({
     onSelectionBox,
     onPreviewMove,
     onPreviewEnd,
+    onRotateStart,
     onRotatePreview,
     onRotate,
     onMeasure,
@@ -178,6 +180,7 @@ function PixiBoard({
         );
       };
       const turn = (model, event) => {
+        state.current.onRotateStart();
         const box = app.canvas.getBoundingClientRect(),
           center = {
             x: box.left + (box.width * model.x) / 100,
@@ -597,12 +600,27 @@ function App() {
     [chargeIds, setChargeIds] = useState([]),
     [rotationCharges, setRotationCharges] = useState([]),
     sock = useRef(),
-    clientId = useRef(null);
+    clientId = useRef(null),
+    history = useRef({ past: [], future: [] });
   const selectedModels = models.filter((m) => selected.includes(m.id)),
     model = selectedModels.length === 1 ? selectedModels[0] : null,
     send = (message) =>
       sock.current?.readyState === 1 &&
       sock.current.send(JSON.stringify(message));
+  const snapshotBoard = () =>
+      structuredClone({ models, circles, chargeIds, rotationCharges }),
+    applyBoard = (board) => {
+      setModels(board.models);
+      setCircles(board.circles);
+      setChargeIds(board.chargeIds);
+      setRotationCharges(board.rotationCharges);
+      send({ type: "boardState", board });
+    },
+    recordHistory = () => {
+      history.current.past.push(snapshotBoard());
+      if (history.current.past.length > 100) history.current.past.shift();
+      history.current.future = [];
+    };
   useEffect(() => {
     const room = new URL(location).searchParams.get("room"),
       ws = (sock.current = new WebSocket(
@@ -659,19 +677,24 @@ function App() {
       update(id, { rotation });
       send({ type: "rotate", id, rotation });
     },
-    rotate = (amount) =>
+    rotate = (amount) => {
+      recordHistory();
       selectedModels.forEach((entry) =>
         turn(entry.id, ((entry.rotation || 0) + amount + 360) % 360),
-      ),
-    moveSelection = (direction, step) =>
+      );
+    },
+    moveSelection = (direction, step) => {
+      recordHistory();
       selectedModels.forEach((entry) => {
         const rotation = ((entry.rotation || 0) * Math.PI) / 180;
         move(entry.id, {
           x: clamp(entry.x + Math.sin(rotation) * step * direction, 2, 98),
           y: clamp(entry.y - Math.cos(rotation) * step * direction, 2, 98),
         });
-      }),
-    moveBoardRelative = (xDirection, yDirection) =>
+      });
+    },
+    moveBoardRelative = (xDirection, yDirection) => {
+      recordHistory();
       selectedModels.forEach((entry) => {
         const step = (0.25 / BOARD_INCHES) * 100;
         move(entry.id, {
@@ -679,8 +702,28 @@ function App() {
           y: clamp(entry.y + yDirection * step, 2, 98),
         });
       });
+    };
   useEffect(() => {
     const key = (e) => {
+      const primaryModifier = e.metaKey || e.ctrlKey;
+      if (primaryModifier && e.key.toLowerCase() === "z") {
+        const previous = history.current.past.pop();
+        if (previous) {
+          history.current.future.push(snapshotBoard());
+          applyBoard(previous);
+        }
+        e.preventDefault();
+        return;
+      }
+      if (primaryModifier && e.key.toLowerCase() === "y") {
+        const next = history.current.future.pop();
+        if (next) {
+          history.current.past.push(snapshotBoard());
+          applyBoard(next);
+        }
+        e.preventDefault();
+        return;
+      }
       if (e.key === "Escape" && pendingMove) {
         setPendingMove(null);
         send({ type: "previewClear" });
@@ -688,6 +731,7 @@ function App() {
         return;
       }
       if (e.key === "Enter" && pendingMove && !pendingMove.isDragging) {
+        recordHistory();
         pendingMove.models.forEach((position) =>
           move(position.id, { x: position.x, y: position.y }),
         );
@@ -697,6 +741,7 @@ function App() {
         return;
       }
       if (e.ctrlKey && e.key === "." && selectedModels.length) {
+        recordHistory();
         updateCircles((current) =>
           selectedModels.reduce(
             (next, entry) => ({ ...next, [entry.id]: [] }),
@@ -708,6 +753,7 @@ function App() {
       }
       const digitShortcut = e.code.match(/^Digit([0-9])$/);
       if (e.ctrlKey && selectedModels.length && digitShortcut) {
+        recordHistory();
         const digit = Number(digitShortcut[1]);
         const range = e.altKey ? (digit || 10) + 10 : digit || 10;
         updateCircles((current) => {
@@ -731,6 +777,7 @@ function App() {
         return;
       }
       if (e.key.toLowerCase() === "c" && selectedModels.length) {
+        recordHistory();
         const aimingLaneIds = selectedModels
           .filter((entry) =>
             rotationCharges.some((charge) => charge.id === entry.id),
@@ -772,7 +819,16 @@ function App() {
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
-  }, [model, pendingMove, rotationCharges, selected, selectedModels]);
+  }, [
+    chargeIds,
+    circles,
+    model,
+    models,
+    pendingMove,
+    rotationCharges,
+    selected,
+    selectedModels,
+  ]);
   const values = model ? circles[model.id] || [] : [];
   return (
     <main>
@@ -812,9 +868,10 @@ function App() {
           <CircleSelect
             disabled={!model}
             values={values}
-            onChange={(value) =>
-              updateCircles((current) => ({ ...current, [model.id]: value }))
-            }
+            onChange={(value) => {
+              recordHistory();
+              updateCircles((current) => ({ ...current, [model.id]: value }));
+            }}
           />
         </div>
         <PixiBoard
@@ -844,6 +901,7 @@ function App() {
             setPendingMove(preview);
             send({ type: "preview", ...preview });
           }}
+          onRotateStart={recordHistory}
           onRotatePreview={(preview) => {
             setRotationCharges((current) => [
               ...current.filter((charge) => charge.id !== preview.id),
@@ -866,6 +924,7 @@ function App() {
               <select
                 value={model.baseMm ?? 30}
                 onChange={(e) => {
+                  recordHistory();
                   const baseMm = Number(e.target.value);
                   update(model.id, { baseMm });
                   send({ type: "base", id: model.id, baseMm });
