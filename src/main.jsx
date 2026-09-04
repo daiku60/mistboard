@@ -55,7 +55,7 @@ function PixiBoard({
   selectionBox,
   pendingMove,
   circles,
-  chargeId,
+  chargeIds,
   measuring,
   ruler,
   zoom,
@@ -75,7 +75,7 @@ function PixiBoard({
     selectionBox,
     pendingMove,
     circles,
-    chargeId,
+    chargeIds,
     measuring,
     ruler,
     zoom,
@@ -305,19 +305,20 @@ function PixiBoard({
               .stroke({ color: 0xf0dc88, alpha: 0.9, width: 1 }),
           );
         }
-        const charge = s.models.find((m) => m.id === s.chargeId);
-        if (charge) {
-          const points = chargeLanePoints(charge, 10).flatMap((p) => [
-            px(p.x),
-            px(p.y),
-          ]);
-          add(
-            new Graphics()
-              .poly(points, true)
-              .fill({ color: 0xf0dc88, alpha: 0.22 })
-              .stroke({ color: 0xf0dc88, alpha: 0.8, width: 1 }),
-          );
-        }
+        s.models
+          .filter((model) => s.chargeIds.includes(model.id))
+          .forEach((charge) => {
+            const points = chargeLanePoints(charge, 10).flatMap((p) => [
+              px(p.x),
+              px(p.y),
+            ]);
+            add(
+              new Graphics()
+                .poly(points, true)
+                .fill({ color: 0xf0dc88, alpha: 0.22 })
+                .stroke({ color: 0xf0dc88, alpha: 0.8, width: 1 }),
+            );
+          });
         Object.entries(s.circles).forEach(([id, values]) => {
           const model = s.models.find((m) => m.id === id);
           if (!model) return;
@@ -558,7 +559,7 @@ function App() {
     [zoom, setZoom] = useState(1),
     [measuring, setMeasuring] = useState(false),
     [ruler, setRuler] = useState(null),
-    [chargeId, setChargeId] = useState(null),
+    [chargeIds, setChargeIds] = useState([]),
     sock = useRef();
   const selectedModels = models.filter((m) => selected.includes(m.id)),
     model = selectedModels.length === 1 ? selectedModels[0] : null,
@@ -633,8 +634,13 @@ function App() {
         e.preventDefault();
         return;
       }
-      if (e.ctrlKey && e.key === "." && model) {
-        setCircles((current) => ({ ...current, [model.id]: [] }));
+      if (e.ctrlKey && e.key === "." && selectedModels.length) {
+        setCircles((current) =>
+          selectedModels.reduce(
+            (next, entry) => ({ ...next, [entry.id]: [] }),
+            { ...current },
+          ),
+        );
         e.preventDefault();
         return;
       }
@@ -662,8 +668,15 @@ function App() {
         e.preventDefault();
         return;
       }
-      if (e.key.toLowerCase() === "c" && model) {
-        setChargeId((id) => (id === model.id ? null : model.id));
+      if (e.key.toLowerCase() === "c" && selectedModels.length) {
+        setChargeIds((current) => {
+          const everyModelHasChargeLane = selectedModels.every((entry) =>
+            current.includes(entry.id),
+          );
+          return everyModelHasChargeLane
+            ? current.filter((id) => !selected.includes(id))
+            : [...new Set([...current, ...selected])];
+        });
         e.preventDefault();
         return;
       }
@@ -682,7 +695,7 @@ function App() {
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
-  }, [model, pendingMove, selectedModels]);
+  }, [model, pendingMove, selected, selectedModels]);
   const values = model ? circles[model.id] || [] : [];
   return (
     <main>
@@ -733,7 +746,7 @@ function App() {
           selectionBox={selectionBox}
           pendingMove={pendingMove}
           circles={circles}
-          chargeId={chargeId}
+          chargeIds={chargeIds}
           measuring={measuring}
           ruler={ruler}
           zoom={zoom}
