@@ -54,6 +54,7 @@ function PixiBoard({
   selected,
   selectionBox,
   pendingMove,
+  remotePreview,
   circles,
   chargeIds,
   rotationCharge,
@@ -77,6 +78,7 @@ function PixiBoard({
     selected,
     selectionBox,
     pendingMove,
+    remotePreview,
     circles,
     chargeIds,
     rotationCharge,
@@ -129,6 +131,7 @@ function PixiBoard({
         );
         const start = { x: event.clientX, y: event.clientY };
         let latest = { x: model.x, y: model.y },
+          previewPositions = null,
           moved = false;
         const moveGroup = (target) => {
           const requestedX = target.x - model.x,
@@ -139,13 +142,12 @@ function PixiBoard({
             maxY = Math.min(...originals.map((entry) => 98 - entry.y)),
             xOffset = clamp(requestedX, minX, maxX),
             yOffset = clamp(requestedY, minY, maxY);
-          state.current.onPreviewMove(
-            originals.map((entry) => ({
-              id: entry.id,
-              x: entry.x + xOffset,
-              y: entry.y + yOffset,
-            })),
-          );
+          previewPositions = originals.map((entry) => ({
+            id: entry.id,
+            x: entry.x + xOffset,
+            y: entry.y + yOffset,
+          }));
+          state.current.onPreviewMove(previewPositions);
         };
         const move = (e) => {
             latest = point(e);
@@ -156,7 +158,7 @@ function PixiBoard({
             window.removeEventListener("pointermove", move);
             if (!moved) return;
             moveGroup(latest);
-            state.current.onPreviewEnd();
+            state.current.onPreviewEnd(previewPositions);
           };
         window.addEventListener("pointermove", move);
         window.addEventListener("pointerup", up, { once: true });
@@ -472,91 +474,95 @@ function PixiBoard({
           label.eventMode = "none";
           app.stage.addChild(label);
         });
-        s.pendingMove?.models.forEach((position) => {
-          const model = s.models.find((entry) => entry.id === position.id);
-          if (!model) return;
-          const x = px(position.x),
-            y = px(position.y),
-            radius = inches(baseDiameterInches(model) / 2),
-            opacity = s.pendingMove.isDragging ? 0.45 : 0.65,
-            outline = s.pendingMove.isDragging ? 0xeeeeee : 0xf0dc88;
-          const ghost = new Graphics()
-            .circle(x, y, radius)
-            .fill({ color: model.color, alpha: opacity })
-            .stroke({ color: outline, alpha: opacity, width: 3 });
-          ghost.zIndex = 20;
-          const radians = ((model.rotation || 0) * Math.PI) / 180,
-            forward = { x: Math.sin(radians), y: -Math.cos(radians) },
-            sideways = { x: Math.cos(radians), y: Math.sin(radians) },
-            tip = {
-              x: x + forward.x * (radius + 9),
-              y: y + forward.y * (radius + 9),
-            },
-            baseCenter = {
-              x: x + forward.x * (radius + 2),
-              y: y + forward.y * (radius + 2),
-            },
-            halfWidth = Math.max(3, radius * 0.25);
-          ghost
-            .poly(
-              [
-                tip.x,
-                tip.y,
-                baseCenter.x + sideways.x * halfWidth,
-                baseCenter.y + sideways.y * halfWidth,
-                baseCenter.x - sideways.x * halfWidth,
-                baseCenter.y - sideways.y * halfWidth,
-              ],
-              true,
-            )
-            .fill({ color: 0x17251b, alpha: opacity });
-          app.stage.addChild(ghost);
-          const modelLabel = new Text({
-            text: model.name[0],
-            style: {
-              fill: 0x17251b,
-              fontFamily: "DM Serif Display",
-              fontSize: Math.max(10, radius * 0.8),
-            },
-          });
-          modelLabel.alpha = opacity;
-          modelLabel.anchor.set(0.5);
-          modelLabel.position.set(x, y);
-          modelLabel.zIndex = 21;
-          app.stage.addChild(modelLabel);
-          (s.circles[model.id] || []).forEach((range) => {
-            const circleRadius = inches(range + baseDiameterInches(model) / 2);
-            const circle = new Graphics()
-              .circle(x, y, circleRadius)
-              .fill({ color: 0xf0dc88, alpha: 0.11 * opacity })
-              .stroke({ color: 0xf0dc88, alpha: opacity, width: 2 });
-            circle.zIndex = 30;
-            add(circle);
-            const label = new Text({
-              text: `${range}″`,
+        [s.pendingMove, s.remotePreview].filter(Boolean).forEach((preview) => {
+          preview.models.forEach((position) => {
+            const model = s.models.find((entry) => entry.id === position.id);
+            if (!model) return;
+            const x = px(position.x),
+              y = px(position.y),
+              radius = inches(baseDiameterInches(model) / 2),
+              opacity = preview.isDragging ? 0.45 : 0.65,
+              outline = preview.isDragging ? 0xeeeeee : 0xf0dc88;
+            const ghost = new Graphics()
+              .circle(x, y, radius)
+              .fill({ color: model.color, alpha: opacity })
+              .stroke({ color: outline, alpha: opacity, width: 3 });
+            ghost.zIndex = 20;
+            const radians = ((model.rotation || 0) * Math.PI) / 180,
+              forward = { x: Math.sin(radians), y: -Math.cos(radians) },
+              sideways = { x: Math.cos(radians), y: Math.sin(radians) },
+              tip = {
+                x: x + forward.x * (radius + 9),
+                y: y + forward.y * (radius + 9),
+              },
+              baseCenter = {
+                x: x + forward.x * (radius + 2),
+                y: y + forward.y * (radius + 2),
+              },
+              halfWidth = Math.max(3, radius * 0.25);
+            ghost
+              .poly(
+                [
+                  tip.x,
+                  tip.y,
+                  baseCenter.x + sideways.x * halfWidth,
+                  baseCenter.y + sideways.y * halfWidth,
+                  baseCenter.x - sideways.x * halfWidth,
+                  baseCenter.y - sideways.y * halfWidth,
+                ],
+                true,
+              )
+              .fill({ color: 0x17251b, alpha: opacity });
+            app.stage.addChild(ghost);
+            const modelLabel = new Text({
+              text: model.name[0],
               style: {
-                fill: 0xf0dc88,
-                fontFamily: "DM Mono",
-                fontSize: 11,
-                fontWeight: "bold",
+                fill: 0x17251b,
+                fontFamily: "DM Serif Display",
+                fontSize: Math.max(10, radius * 0.8),
               },
             });
-            label.alpha = opacity;
-            label.anchor.set(0.5);
-            label.position.set(x, y - circleRadius + 10);
-            label.zIndex = 32;
-            const labelBackground = new Graphics()
-              .roundRect(
-                x - label.width / 2 - 4,
-                y - circleRadius + 2,
-                label.width + 8,
-                label.height + 4,
-                3,
-              )
-              .fill({ color: 0x17251b, alpha: 0.7 * opacity });
-            labelBackground.zIndex = 31;
-            add(labelBackground);
-            app.stage.addChild(label);
+            modelLabel.alpha = opacity;
+            modelLabel.anchor.set(0.5);
+            modelLabel.position.set(x, y);
+            modelLabel.zIndex = 21;
+            app.stage.addChild(modelLabel);
+            (s.circles[model.id] || []).forEach((range) => {
+              const circleRadius = inches(
+                range + baseDiameterInches(model) / 2,
+              );
+              const circle = new Graphics()
+                .circle(x, y, circleRadius)
+                .fill({ color: 0xf0dc88, alpha: 0.11 * opacity })
+                .stroke({ color: 0xf0dc88, alpha: opacity, width: 2 });
+              circle.zIndex = 30;
+              add(circle);
+              const label = new Text({
+                text: `${range}″`,
+                style: {
+                  fill: 0xf0dc88,
+                  fontFamily: "DM Mono",
+                  fontSize: 11,
+                  fontWeight: "bold",
+                },
+              });
+              label.alpha = opacity;
+              label.anchor.set(0.5);
+              label.position.set(x, y - circleRadius + 10);
+              label.zIndex = 32;
+              const labelBackground = new Graphics()
+                .roundRect(
+                  x - label.width / 2 - 4,
+                  y - circleRadius + 2,
+                  label.width + 8,
+                  label.height + 4,
+                  3,
+                )
+                .fill({ color: 0x17251b, alpha: 0.7 * opacity });
+              labelBackground.zIndex = 31;
+              add(labelBackground);
+              app.stage.addChild(label);
+            });
           });
         });
       };
@@ -586,13 +592,15 @@ function App() {
     [selected, setSelected] = useState([]),
     [selectionBox, setSelectionBox] = useState(null),
     [pendingMove, setPendingMove] = useState(null),
+    [remotePreview, setRemotePreview] = useState(null),
     [circles, setCircles] = useState({}),
     [zoom, setZoom] = useState(1),
     [measuring, setMeasuring] = useState(false),
     [ruler, setRuler] = useState(null),
     [chargeIds, setChargeIds] = useState([]),
     [rotationCharge, setRotationCharge] = useState(null),
-    sock = useRef();
+    sock = useRef(),
+    clientId = useRef(null);
   const selectedModels = models.filter((m) => selected.includes(m.id)),
     model = selectedModels.length === 1 ? selectedModels[0] : null,
     send = (message) =>
@@ -606,11 +614,33 @@ function App() {
     ws.onmessage = ({ data }) => {
       const message = JSON.parse(data);
       if (message.models) setModels(message.models);
+      if (message.circles) setCircles(message.circles);
+      if (message.chargeIds) setChargeIds(message.chargeIds);
+      if (message.clientId) clientId.current = message.clientId;
+      if (message.type === "preview" && message.senderId !== clientId.current)
+        setRemotePreview(message.preview);
+      if (
+        message.type === "previewClear" &&
+        message.senderId !== clientId.current
+      )
+        setRemotePreview(null);
       if (message.roomId)
         history.replaceState({}, "", `?room=${message.roomId}`);
     };
     return () => ws.close();
   }, []);
+  const updateCircles = (updater) =>
+      setCircles((current) => {
+        const next = updater(current);
+        send({ type: "circles", circles: next });
+        return next;
+      }),
+    updateChargeIds = (updater) =>
+      setChargeIds((current) => {
+        const next = updater(current);
+        send({ type: "chargeLanes", chargeIds: next });
+        return next;
+      });
   const update = (id, patch) =>
       setModels((current) =>
         current.map((m) => (m.id === id ? { ...m, ...patch } : m)),
@@ -655,6 +685,7 @@ function App() {
     const key = (e) => {
       if (e.key === "Escape" && pendingMove) {
         setPendingMove(null);
+        send({ type: "previewClear" });
         e.preventDefault();
         return;
       }
@@ -663,11 +694,12 @@ function App() {
           move(position.id, { x: position.x, y: position.y }),
         );
         setPendingMove(null);
+        send({ type: "previewClear" });
         e.preventDefault();
         return;
       }
       if (e.ctrlKey && e.key === "." && selectedModels.length) {
-        setCircles((current) =>
+        updateCircles((current) =>
           selectedModels.reduce(
             (next, entry) => ({ ...next, [entry.id]: [] }),
             { ...current },
@@ -680,7 +712,7 @@ function App() {
       if (e.ctrlKey && selectedModels.length && digitShortcut) {
         const digit = Number(digitShortcut[1]);
         const range = e.altKey ? (digit || 10) + 10 : digit || 10;
-        setCircles((current) => {
+        updateCircles((current) => {
           const everyModelHasRange = selectedModels.every((entry) =>
             (current[entry.id] || []).includes(range),
           );
@@ -701,7 +733,7 @@ function App() {
         return;
       }
       if (e.key.toLowerCase() === "c" && selectedModels.length) {
-        setChargeIds((current) => {
+        updateChargeIds((current) => {
           const everyModelHasChargeLane = selectedModels.every((entry) =>
             current.includes(entry.id),
           );
@@ -768,7 +800,7 @@ function App() {
             disabled={!model}
             values={values}
             onChange={(value) =>
-              setCircles((current) => ({ ...current, [model.id]: value }))
+              updateCircles((current) => ({ ...current, [model.id]: value }))
             }
           />
         </div>
@@ -777,6 +809,7 @@ function App() {
           selected={selected}
           selectionBox={selectionBox}
           pendingMove={pendingMove}
+          remotePreview={remotePreview}
           circles={circles}
           chargeIds={chargeIds}
           rotationCharge={rotationCharge}
@@ -788,14 +821,16 @@ function App() {
             if (!ids.length) setRuler(null);
           }}
           onSelectionBox={setSelectionBox}
-          onPreviewMove={(positions) =>
-            setPendingMove({ isDragging: true, models: positions })
-          }
-          onPreviewEnd={() =>
-            setPendingMove((current) =>
-              current ? { ...current, isDragging: false } : current,
-            )
-          }
+          onPreviewMove={(positions) => {
+            const preview = { isDragging: true, models: positions };
+            setPendingMove(preview);
+            send({ type: "preview", ...preview });
+          }}
+          onPreviewEnd={(positions) => {
+            const preview = { isDragging: false, models: positions };
+            setPendingMove(preview);
+            send({ type: "preview", ...preview });
+          }}
           onRotatePreview={setRotationCharge}
           onRotateEnd={() => setRotationCharge(null)}
           onRotate={turn}
