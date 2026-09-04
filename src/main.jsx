@@ -58,6 +58,7 @@ function PixiBoard({
   circles,
   chargeIds,
   rotationCharge,
+  remoteRotationCharge,
   measuring,
   ruler,
   zoom,
@@ -82,6 +83,7 @@ function PixiBoard({
     circles,
     chargeIds,
     rotationCharge,
+    remoteRotationCharge,
     measuring,
     ruler,
     zoom,
@@ -352,6 +354,12 @@ function PixiBoard({
           );
           if (charge) drawChargeLane(charge, s.rotationCharge.length);
         }
+        if (s.remoteRotationCharge) {
+          const charge = s.models.find(
+            (model) => model.id === s.remoteRotationCharge.id,
+          );
+          if (charge) drawChargeLane(charge, s.remoteRotationCharge.length);
+        }
         Object.entries(s.circles).forEach(([id, values]) => {
           const model = s.models.find((m) => m.id === id);
           if (!model) return;
@@ -599,6 +607,7 @@ function App() {
     [ruler, setRuler] = useState(null),
     [chargeIds, setChargeIds] = useState([]),
     [rotationCharge, setRotationCharge] = useState(null),
+    [remoteRotationCharge, setRemoteRotationCharge] = useState(null),
     sock = useRef(),
     clientId = useRef(null);
   const selectedModels = models.filter((m) => selected.includes(m.id)),
@@ -624,6 +633,16 @@ function App() {
         message.senderId !== clientId.current
       )
         setRemotePreview(null);
+      if (
+        message.type === "rotationCharge" &&
+        message.senderId !== clientId.current
+      )
+        setRemoteRotationCharge(message.rotationCharge);
+      if (
+        message.type === "rotationChargeClear" &&
+        message.senderId !== clientId.current
+      )
+        setRemoteRotationCharge(null);
       if (message.roomId)
         history.replaceState({}, "", `?room=${message.roomId}`);
     };
@@ -813,6 +832,7 @@ function App() {
           circles={circles}
           chargeIds={chargeIds}
           rotationCharge={rotationCharge}
+          remoteRotationCharge={remoteRotationCharge}
           measuring={measuring}
           ruler={ruler}
           zoom={zoom}
@@ -831,8 +851,14 @@ function App() {
             setPendingMove(preview);
             send({ type: "preview", ...preview });
           }}
-          onRotatePreview={setRotationCharge}
-          onRotateEnd={() => setRotationCharge(null)}
+          onRotatePreview={(preview) => {
+            setRotationCharge(preview);
+            send({ type: "rotationCharge", ...preview });
+          }}
+          onRotateEnd={() => {
+            setRotationCharge(null);
+            send({ type: "rotationChargeClear" });
+          }}
           onRotate={turn}
           onMeasure={(next) => {
             if (next === undefined) setMeasuring(false);

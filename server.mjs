@@ -281,6 +281,28 @@ export function createMistboardServer({
             broadcast(roomId, { type: "previewClear", senderId: client.id });
             return;
           }
+          if (message.type === "rotationCharge") {
+            const model = store
+              .get(roomId)
+              .models.find((entry) => entry.id === message.id);
+            if (!model || !Number.isFinite(message.length)) return;
+            broadcast(roomId, {
+              type: "rotationCharge",
+              senderId: client.id,
+              rotationCharge: {
+                id: model.id,
+                length: Math.max(0, Math.min(72, message.length)),
+              },
+            });
+            return;
+          }
+          if (message.type === "rotationChargeClear") {
+            broadcast(roomId, {
+              type: "rotationChargeClear",
+              senderId: client.id,
+            });
+            return;
+          }
           const changed =
             message.type === "move"
               ? store.move(roomId, message)
