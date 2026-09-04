@@ -57,8 +57,7 @@ function PixiBoard({
   remotePreview,
   circles,
   chargeIds,
-  rotationCharge,
-  remoteRotationCharge,
+  rotationCharges,
   measuring,
   ruler,
   zoom,
@@ -67,7 +66,6 @@ function PixiBoard({
   onPreviewMove,
   onPreviewEnd,
   onRotatePreview,
-  onRotateEnd,
   onRotate,
   onMeasure,
 }) {
@@ -82,8 +80,7 @@ function PixiBoard({
     remotePreview,
     circles,
     chargeIds,
-    rotationCharge,
-    remoteRotationCharge,
+    rotationCharges,
     measuring,
     ruler,
     zoom,
@@ -92,7 +89,6 @@ function PixiBoard({
     onPreviewMove,
     onPreviewEnd,
     onRotatePreview,
-    onRotateEnd,
     onRotate,
     onMeasure,
   };
@@ -217,7 +213,6 @@ function PixiBoard({
           "mouseup",
           () => {
             window.removeEventListener("mousemove", move);
-            state.current.onRotateEnd();
           },
           { once: true },
         );
@@ -348,18 +343,12 @@ function PixiBoard({
         s.models
           .filter((model) => s.chargeIds.includes(model.id))
           .forEach((charge) => drawChargeLane(charge, 10));
-        if (s.rotationCharge) {
+        s.rotationCharges.forEach((rotationCharge) => {
           const charge = s.models.find(
-            (model) => model.id === s.rotationCharge.id,
+            (model) => model.id === rotationCharge.id,
           );
-          if (charge) drawChargeLane(charge, s.rotationCharge.length);
-        }
-        if (s.remoteRotationCharge) {
-          const charge = s.models.find(
-            (model) => model.id === s.remoteRotationCharge.id,
-          );
-          if (charge) drawChargeLane(charge, s.remoteRotationCharge.length);
-        }
+          if (charge) drawChargeLane(charge, rotationCharge.length);
+        });
         Object.entries(s.circles).forEach(([id, values]) => {
           const model = s.models.find((m) => m.id === id);
           if (!model) return;
@@ -606,8 +595,7 @@ function App() {
     [measuring, setMeasuring] = useState(false),
     [ruler, setRuler] = useState(null),
     [chargeIds, setChargeIds] = useState([]),
-    [rotationCharge, setRotationCharge] = useState(null),
-    [remoteRotationCharge, setRemoteRotationCharge] = useState(null),
+    [rotationCharges, setRotationCharges] = useState([]),
     sock = useRef(),
     clientId = useRef(null);
   const selectedModels = models.filter((m) => selected.includes(m.id)),
@@ -625,6 +613,7 @@ function App() {
       if (message.models) setModels(message.models);
       if (message.circles) setCircles(message.circles);
       if (message.chargeIds) setChargeIds(message.chargeIds);
+      if (message.rotationCharges) setRotationCharges(message.rotationCharges);
       if (message.clientId) clientId.current = message.clientId;
       if (message.type === "preview" && message.senderId !== clientId.current)
         setRemotePreview(message.preview);
@@ -633,16 +622,6 @@ function App() {
         message.senderId !== clientId.current
       )
         setRemotePreview(null);
-      if (
-        message.type === "rotationCharge" &&
-        message.senderId !== clientId.current
-      )
-        setRemoteRotationCharge(message.rotationCharge);
-      if (
-        message.type === "rotationChargeClear" &&
-        message.senderId !== clientId.current
-      )
-        setRemoteRotationCharge(null);
       if (message.roomId)
         history.replaceState({}, "", `?room=${message.roomId}`);
     };
@@ -752,6 +731,21 @@ function App() {
         return;
       }
       if (e.key.toLowerCase() === "c" && selectedModels.length) {
+        const aimingLaneIds = selectedModels
+          .filter((entry) =>
+            rotationCharges.some((charge) => charge.id === entry.id),
+          )
+          .map((entry) => entry.id);
+        if (aimingLaneIds.length) {
+          setRotationCharges((current) =>
+            current.filter((charge) => !aimingLaneIds.includes(charge.id)),
+          );
+          aimingLaneIds.forEach((id) =>
+            send({ type: "rotationChargeClear", id }),
+          );
+          e.preventDefault();
+          return;
+        }
         updateChargeIds((current) => {
           const everyModelHasChargeLane = selectedModels.every((entry) =>
             current.includes(entry.id),
@@ -778,7 +772,7 @@ function App() {
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
-  }, [model, pendingMove, selected, selectedModels]);
+  }, [model, pendingMove, rotationCharges, selected, selectedModels]);
   const values = model ? circles[model.id] || [] : [];
   return (
     <main>
@@ -831,8 +825,7 @@ function App() {
           remotePreview={remotePreview}
           circles={circles}
           chargeIds={chargeIds}
-          rotationCharge={rotationCharge}
-          remoteRotationCharge={remoteRotationCharge}
+          rotationCharges={rotationCharges}
           measuring={measuring}
           ruler={ruler}
           zoom={zoom}
@@ -852,12 +845,11 @@ function App() {
             send({ type: "preview", ...preview });
           }}
           onRotatePreview={(preview) => {
-            setRotationCharge(preview);
+            setRotationCharges((current) => [
+              ...current.filter((charge) => charge.id !== preview.id),
+              preview,
+            ]);
             send({ type: "rotationCharge", ...preview });
-          }}
-          onRotateEnd={() => {
-            setRotationCharge(null);
-            send({ type: "rotationChargeClear" });
           }}
           onRotate={turn}
           onMeasure={(next) => {

@@ -41,6 +41,7 @@ export class RoomStore {
         clients: new Set(),
         chargeIds: [],
         circles: {},
+        rotationCharges: [],
         expiryTimer: null,
         models: structuredClone(STARTING_MODELS),
       };
@@ -126,6 +127,26 @@ export class RoomStore {
     if (chargeIds.some((id) => typeof id !== "string" || !modelIds.has(id)))
       return false;
     room.chargeIds = [...new Set(chargeIds)];
+    return true;
+  }
+
+  setRotationCharge(roomId, { id, length }) {
+    if (typeof id !== "string" || !Number.isFinite(length)) return false;
+    const room = this.get(roomId);
+    if (!room.models.some((model) => model.id === id)) return false;
+    room.rotationCharges = [
+      ...room.rotationCharges.filter((charge) => charge.id !== id),
+      { id, length: Math.max(0, Math.min(72, length)) },
+    ];
+    return true;
+  }
+
+  clearRotationCharge(roomId, { id }) {
+    if (typeof id !== "string") return false;
+    const room = this.get(roomId);
+    const next = room.rotationCharges.filter((charge) => charge.id !== id);
+    if (next.length === room.rotationCharges.length) return false;
+    room.rotationCharges = next;
     return true;
   }
 }
@@ -249,6 +270,7 @@ export function createMistboardServer({
       models: room.models,
       circles: room.circles,
       chargeIds: room.chargeIds,
+      rotationCharges: room.rotationCharges,
     });
     broadcast(roomId, { type: "presence", count: count(roomId) });
     socket.once("close", () => removeClient(client));
@@ -282,24 +304,26 @@ export function createMistboardServer({
             return;
           }
           if (message.type === "rotationCharge") {
-            const model = store
-              .get(roomId)
-              .models.find((entry) => entry.id === message.id);
-            if (!model || !Number.isFinite(message.length)) return;
+            const changed = store.setRotationCharge(roomId, message);
+            if (!changed) return;
             broadcast(roomId, {
-              type: "rotationCharge",
-              senderId: client.id,
-              rotationCharge: {
-                id: model.id,
-                length: Math.max(0, Math.min(72, message.length)),
-              },
+              type: "state",
+              models: store.get(roomId).models,
+              circles: store.get(roomId).circles,
+              chargeIds: store.get(roomId).chargeIds,
+              rotationCharges: store.get(roomId).rotationCharges,
             });
             return;
           }
           if (message.type === "rotationChargeClear") {
+            const changed = store.clearRotationCharge(roomId, message);
+            if (!changed) return;
             broadcast(roomId, {
-              type: "rotationChargeClear",
-              senderId: client.id,
+              type: "state",
+              models: store.get(roomId).models,
+              circles: store.get(roomId).circles,
+              chargeIds: store.get(roomId).chargeIds,
+              rotationCharges: store.get(roomId).rotationCharges,
             });
             return;
           }
@@ -321,6 +345,7 @@ export function createMistboardServer({
             models: store.get(roomId).models,
             circles: store.get(roomId).circles,
             chargeIds: store.get(roomId).chargeIds,
+            rotationCharges: store.get(roomId).rotationCharges,
           });
         } catch {
           // Invalid client messages do not affect the room.

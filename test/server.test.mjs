@@ -62,6 +62,15 @@ test("circles and charge lanes are shared room state", () => {
     "ember-1": [20],
   });
   assert.deepEqual(store.get("room").chargeIds, ["iron-1", "ember-1"]);
+  assert.equal(
+    store.setRotationCharge("room", { id: "iron-1", length: 13.5 }),
+    true,
+  );
+  assert.deepEqual(store.get("room").rotationCharges, [
+    { id: "iron-1", length: 13.5 },
+  ]);
+  assert.equal(store.clearRotationCharge("room", { id: "iron-1" }), true);
+  assert.deepEqual(store.get("room").rotationCharges, []);
   assert.equal(store.setCircles("room", { circles: { unknown: [3] } }), false);
   assert.equal(store.setChargeLanes("room", { chargeIds: ["unknown"] }), false);
 });
