@@ -53,6 +53,7 @@ function PixiBoard({
   models,
   selected,
   selectionBox,
+  pendingMove,
   circles,
   chargeId,
   measuring,
@@ -60,7 +61,8 @@ function PixiBoard({
   zoom,
   onSelect,
   onSelectionBox,
-  onMove,
+  onPreviewMove,
+  onPreviewEnd,
   onRotate,
   onMeasure,
 }) {
@@ -71,6 +73,7 @@ function PixiBoard({
     models,
     selected,
     selectionBox,
+    pendingMove,
     circles,
     chargeId,
     measuring,
@@ -78,7 +81,8 @@ function PixiBoard({
     zoom,
     onSelect,
     onSelectionBox,
-    onMove,
+    onPreviewMove,
+    onPreviewEnd,
     onRotate,
     onMeasure,
   };
@@ -117,7 +121,9 @@ function PixiBoard({
         const originals = state.current.models.filter((entry) =>
           state.current.selected.includes(entry.id),
         );
-        let latest = { x: model.x, y: model.y };
+        const start = { x: event.clientX, y: event.clientY };
+        let latest = { x: model.x, y: model.y },
+          moved = false;
         const moveGroup = (target) => {
           const requestedX = target.x - model.x,
             requestedY = target.y - model.y,
@@ -127,20 +133,24 @@ function PixiBoard({
             maxY = Math.min(...originals.map((entry) => 98 - entry.y)),
             xOffset = clamp(requestedX, minX, maxX),
             yOffset = clamp(requestedY, minY, maxY);
-          originals.forEach((entry) =>
-            state.current.onMove(entry.id, {
+          state.current.onPreviewMove(
+            originals.map((entry) => ({
+              id: entry.id,
               x: entry.x + xOffset,
               y: entry.y + yOffset,
-            }),
+            })),
           );
         };
         const move = (e) => {
             latest = point(e);
-            moveGroup(latest);
+            moved ||= Math.hypot(e.clientX - start.x, e.clientY - start.y) > 4;
+            if (moved) moveGroup(latest);
           },
           up = () => {
             window.removeEventListener("pointermove", move);
+            if (!moved) return;
             moveGroup(latest);
+            state.current.onPreviewEnd();
           };
         window.addEventListener("pointermove", move);
         window.addEventListener("pointerup", up, { once: true });
@@ -430,6 +440,93 @@ function PixiBoard({
           label.eventMode = "none";
           app.stage.addChild(label);
         });
+        s.pendingMove?.models.forEach((position) => {
+          const model = s.models.find((entry) => entry.id === position.id);
+          if (!model) return;
+          const x = px(position.x),
+            y = px(position.y),
+            radius = inches(baseDiameterInches(model) / 2),
+            opacity = s.pendingMove.isDragging ? 0.45 : 0.65,
+            outline = s.pendingMove.isDragging ? 0xeeeeee : 0xf0dc88;
+          const ghost = new Graphics()
+            .circle(x, y, radius)
+            .fill({ color: model.color, alpha: opacity })
+            .stroke({ color: outline, alpha: opacity, width: 3 });
+          ghost.zIndex = 20;
+          const radians = ((model.rotation || 0) * Math.PI) / 180,
+            forward = { x: Math.sin(radians), y: -Math.cos(radians) },
+            sideways = { x: Math.cos(radians), y: Math.sin(radians) },
+            tip = {
+              x: x + forward.x * (radius + 9),
+              y: y + forward.y * (radius + 9),
+            },
+            baseCenter = {
+              x: x + forward.x * (radius + 2),
+              y: y + forward.y * (radius + 2),
+            },
+            halfWidth = Math.max(3, radius * 0.25);
+          ghost
+            .poly(
+              [
+                tip.x,
+                tip.y,
+                baseCenter.x + sideways.x * halfWidth,
+                baseCenter.y + sideways.y * halfWidth,
+                baseCenter.x - sideways.x * halfWidth,
+                baseCenter.y - sideways.y * halfWidth,
+              ],
+              true,
+            )
+            .fill({ color: 0x17251b, alpha: opacity });
+          app.stage.addChild(ghost);
+          const modelLabel = new Text({
+            text: model.name[0],
+            style: {
+              fill: 0x17251b,
+              fontFamily: "DM Serif Display",
+              fontSize: Math.max(10, radius * 0.8),
+            },
+          });
+          modelLabel.alpha = opacity;
+          modelLabel.anchor.set(0.5);
+          modelLabel.position.set(x, y);
+          modelLabel.zIndex = 21;
+          app.stage.addChild(modelLabel);
+          (s.circles[model.id] || []).forEach((range) => {
+            const circleRadius = inches(range + baseDiameterInches(model) / 2);
+            const circle = new Graphics()
+              .circle(x, y, circleRadius)
+              .fill({ color: 0xf0dc88, alpha: 0.11 * opacity })
+              .stroke({ color: 0xf0dc88, alpha: opacity, width: 2 });
+            circle.zIndex = 30;
+            add(circle);
+            const label = new Text({
+              text: `${range}″`,
+              style: {
+                fill: 0xf0dc88,
+                fontFamily: "DM Mono",
+                fontSize: 11,
+                fontWeight: "bold",
+              },
+            });
+            label.alpha = opacity;
+            label.anchor.set(0.5);
+            label.position.set(x, y - circleRadius + 10);
+            label.zIndex = 32;
+            const labelBackground = new Graphics()
+              .roundRect(
+                x - label.width / 2 - 4,
+                y - circleRadius + 2,
+                label.width + 8,
+                label.height + 4,
+                3,
+              )
+              .fill({ color: 0x17251b, alpha: 0.7 * opacity });
+            labelBackground.zIndex = 31;
+            add(labelBackground);
+            app.stage.addChild(label);
+          });
+        });
       };
       state.current.draw = draw;
       observer = new ResizeObserver(draw);
@@ -456,6 +553,7 @@ function App() {
   const [models, setModels] = useState([]),
     [selected, setSelected] = useState([]),
     [selectionBox, setSelectionBox] = useState(null),
+    [pendingMove, setPendingMove] = useState(null),
     [circles, setCircles] = useState({}),
     [zoom, setZoom] = useState(1),
     [measuring, setMeasuring] = useState(false),
@@ -522,19 +620,44 @@ function App() {
       });
   useEffect(() => {
     const key = (e) => {
+      if (e.key === "Escape" && pendingMove) {
+        setPendingMove(null);
+        e.preventDefault();
+        return;
+      }
+      if (e.key === "Enter" && pendingMove && !pendingMove.isDragging) {
+        pendingMove.models.forEach((position) =>
+          move(position.id, { x: position.x, y: position.y }),
+        );
+        setPendingMove(null);
+        e.preventDefault();
+        return;
+      }
       if (e.ctrlKey && e.key === "." && model) {
         setCircles((current) => ({ ...current, [model.id]: [] }));
         e.preventDefault();
         return;
       }
-      if (e.ctrlKey && model && /^[0-9]$/.test(e.key)) {
-        const digit = Number(e.key);
+      const digitShortcut = e.code.match(/^Digit([0-9])$/);
+      if (e.ctrlKey && selectedModels.length && digitShortcut) {
+        const digit = Number(digitShortcut[1]);
         const range = e.altKey ? (digit || 10) + 10 : digit || 10;
         setCircles((current) => {
-          const ranges = current[model.id] || [];
-          return ranges.includes(range)
-            ? current
-            : { ...current, [model.id]: [...ranges, range] };
+          const everyModelHasRange = selectedModels.every((entry) =>
+            (current[entry.id] || []).includes(range),
+          );
+          return selectedModels.reduce(
+            (next, entry) => {
+              const ranges = current[entry.id] || [];
+              next[entry.id] = everyModelHasRange
+                ? ranges.filter((value) => value !== range)
+                : ranges.includes(range)
+                  ? ranges
+                  : [...ranges, range];
+              return next;
+            },
+            { ...current },
+          );
         });
         e.preventDefault();
         return;
@@ -559,7 +682,7 @@ function App() {
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
-  }, [model, selectedModels]);
+  }, [model, pendingMove, selectedModels]);
   const values = model ? circles[model.id] || [] : [];
   return (
     <main>
@@ -608,6 +731,7 @@ function App() {
           models={models}
           selected={selected}
           selectionBox={selectionBox}
+          pendingMove={pendingMove}
           circles={circles}
           chargeId={chargeId}
           measuring={measuring}
@@ -618,7 +742,14 @@ function App() {
             if (!ids.length) setRuler(null);
           }}
           onSelectionBox={setSelectionBox}
-          onMove={move}
+          onPreviewMove={(positions) =>
+            setPendingMove({ isDragging: true, models: positions })
+          }
+          onPreviewEnd={() =>
+            setPendingMove((current) =>
+              current ? { ...current, isDragging: false } : current,
+            )
+          }
           onRotate={turn}
           onMeasure={(next) => {
             if (next === undefined) setMeasuring(false);
