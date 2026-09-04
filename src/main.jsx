@@ -61,6 +61,8 @@ function PixiBoard({
   measuring,
   ruler,
   zoom,
+  zoomOrigin,
+  onZoom,
   onSelect,
   onSelectionBox,
   onPreviewMove,
@@ -85,6 +87,8 @@ function PixiBoard({
     measuring,
     ruler,
     zoom,
+    zoomOrigin,
+    onZoom,
     onSelect,
     onSelectionBox,
     onPreviewMove,
@@ -100,6 +104,7 @@ function PixiBoard({
   useEffect(() => {
     let app,
       observer,
+      wheel,
       disposed = false,
       hoveredId = null;
     const start = async () => {
@@ -118,6 +123,28 @@ function PixiBoard({
       host.current.appendChild(app.canvas);
       app.canvas.className = "pixi-canvas";
       app.canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+      wheel = (event) => {
+        event.preventDefault();
+        const box = app.canvas.getBoundingClientRect();
+        const baseWidth = app.canvas.clientWidth;
+        const baseHeight = app.canvas.clientHeight;
+        const originX = (state.current.zoomOrigin.x / 100) * baseWidth;
+        const originY = (state.current.zoomOrigin.y / 100) * baseHeight;
+        const baseLeft = box.left - (1 - state.current.zoom) * originX;
+        const baseTop = box.top - (1 - state.current.zoom) * originY;
+        state.current.onZoom(
+          clamp(
+            (-event.deltaY / 600) * (event.deltaMode === 1 ? 16 : 1),
+            -0.2,
+            0.2,
+          ),
+          {
+            x: ((event.clientX - baseLeft) / baseWidth) * 100,
+            y: ((event.clientY - baseTop) / baseHeight) * 100,
+          },
+        );
+      };
+      app.canvas.addEventListener("wheel", wheel, { passive: false });
       const point = (e) => {
         const box = app.canvas.getBoundingClientRect();
         return {
@@ -285,8 +312,10 @@ function PixiBoard({
       const draw = () => {
         if (!app || disposed) return;
         const s = state.current,
-          box = host.current.getBoundingClientRect(),
-          side = Math.max(1, Math.min(box.width, box.height));
+          side = Math.max(
+            1,
+            Math.min(host.current.clientWidth, host.current.clientHeight),
+          );
         app.renderer.resize(side, side);
         app.stage.removeChildren();
         const px = percentToPixels(side),
@@ -574,6 +603,7 @@ function PixiBoard({
     start();
     return () => {
       disposed = true;
+      app?.canvas?.removeEventListener("wheel", wheel);
       observer?.disconnect();
       app?.destroy(true, { children: true });
     };
@@ -582,7 +612,10 @@ function PixiBoard({
     <div
       ref={host}
       className={`board-canvas ${measuring ? "measuring" : ""}`}
-      style={{ transform: `scale(${zoom})` }}
+      style={{
+        transform: `scale(${zoom})`,
+        transformOrigin: `${zoomOrigin.x}% ${zoomOrigin.y}%`,
+      }}
     />
   );
 }
@@ -595,6 +628,7 @@ function App() {
     [remotePreview, setRemotePreview] = useState(null),
     [circles, setCircles] = useState({}),
     [zoom, setZoom] = useState(1),
+    [zoomOrigin, setZoomOrigin] = useState({ x: 50, y: 50 }),
     [measuring, setMeasuring] = useState(false),
     [ruler, setRuler] = useState(null),
     [chargeIds, setChargeIds] = useState([]),
@@ -886,6 +920,11 @@ function App() {
           measuring={measuring}
           ruler={ruler}
           zoom={zoom}
+          zoomOrigin={zoomOrigin}
+          onZoom={(delta, origin) => {
+            setZoomOrigin(origin);
+            setZoom((value) => clamp(value + delta, 0.6, 2.5));
+          }}
           onSelect={(ids) => {
             setSelected(ids);
             if (!ids.length) setRuler(null);
