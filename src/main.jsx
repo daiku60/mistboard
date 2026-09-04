@@ -56,6 +56,7 @@ function PixiBoard({
   pendingMove,
   circles,
   chargeIds,
+  rotationCharge,
   measuring,
   ruler,
   zoom,
@@ -63,6 +64,8 @@ function PixiBoard({
   onSelectionBox,
   onPreviewMove,
   onPreviewEnd,
+  onRotatePreview,
+  onRotateEnd,
   onRotate,
   onMeasure,
 }) {
@@ -76,6 +79,7 @@ function PixiBoard({
     pendingMove,
     circles,
     chargeIds,
+    rotationCharge,
     measuring,
     ruler,
     zoom,
@@ -83,6 +87,8 @@ function PixiBoard({
     onSelectionBox,
     onPreviewMove,
     onPreviewEnd,
+    onRotatePreview,
+    onRotateEnd,
     onRotate,
     onMeasure,
   };
@@ -186,11 +192,29 @@ function PixiBoard({
                 360) *
                 2,
             ) / 2,
-          move = (e) => state.current.onRotate(model.id, angle(e));
+          updateChargePreview = (e) => {
+            if (state.current.chargeIds.includes(model.id)) return;
+            const distance =
+              (Math.hypot(e.clientX - center.x, e.clientY - center.y) /
+                box.width) *
+              BOARD_INCHES;
+            state.current.onRotatePreview({
+              id: model.id,
+              length: Math.max(0, distance - baseDiameterInches(model) / 2),
+            });
+          },
+          move = (e) => {
+            updateChargePreview(e);
+            state.current.onRotate(model.id, angle(e));
+          };
+        updateChargePreview(event);
         window.addEventListener("mousemove", move);
         window.addEventListener(
           "mouseup",
-          () => window.removeEventListener("mousemove", move),
+          () => {
+            window.removeEventListener("mousemove", move);
+            state.current.onRotateEnd();
+          },
           { once: true },
         );
       };
@@ -265,7 +289,19 @@ function PixiBoard({
         app.stage.removeChildren();
         const px = percentToPixels(side),
           inches = inchesToPixels(side),
-          add = (g) => (app.stage.addChild(g), g);
+          add = (g) => (app.stage.addChild(g), g),
+          drawChargeLane = (charge, length) => {
+            const points = chargeLanePoints(charge, length).flatMap((p) => [
+              px(p.x),
+              px(p.y),
+            ]);
+            add(
+              new Graphics()
+                .poly(points, true)
+                .fill({ color: 0xf0dc88, alpha: 0.22 })
+                .stroke({ color: 0xf0dc88, alpha: 0.8, width: 1 }),
+            );
+          };
         const background = add(
           new Graphics().rect(0, 0, side, side).fill(0x789e78),
         );
@@ -307,18 +343,13 @@ function PixiBoard({
         }
         s.models
           .filter((model) => s.chargeIds.includes(model.id))
-          .forEach((charge) => {
-            const points = chargeLanePoints(charge, 10).flatMap((p) => [
-              px(p.x),
-              px(p.y),
-            ]);
-            add(
-              new Graphics()
-                .poly(points, true)
-                .fill({ color: 0xf0dc88, alpha: 0.22 })
-                .stroke({ color: 0xf0dc88, alpha: 0.8, width: 1 }),
-            );
-          });
+          .forEach((charge) => drawChargeLane(charge, 10));
+        if (s.rotationCharge) {
+          const charge = s.models.find(
+            (model) => model.id === s.rotationCharge.id,
+          );
+          if (charge) drawChargeLane(charge, s.rotationCharge.length);
+        }
         Object.entries(s.circles).forEach(([id, values]) => {
           const model = s.models.find((m) => m.id === id);
           if (!model) return;
@@ -560,6 +591,7 @@ function App() {
     [measuring, setMeasuring] = useState(false),
     [ruler, setRuler] = useState(null),
     [chargeIds, setChargeIds] = useState([]),
+    [rotationCharge, setRotationCharge] = useState(null),
     sock = useRef();
   const selectedModels = models.filter((m) => selected.includes(m.id)),
     model = selectedModels.length === 1 ? selectedModels[0] : null,
@@ -747,6 +779,7 @@ function App() {
           pendingMove={pendingMove}
           circles={circles}
           chargeIds={chargeIds}
+          rotationCharge={rotationCharge}
           measuring={measuring}
           ruler={ruler}
           zoom={zoom}
@@ -763,6 +796,8 @@ function App() {
               current ? { ...current, isDragging: false } : current,
             )
           }
+          onRotatePreview={setRotationCharge}
+          onRotateEnd={() => setRotationCharge(null)}
           onRotate={turn}
           onMeasure={(next) => {
             if (next === undefined) setMeasuring(false);
