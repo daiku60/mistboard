@@ -88,7 +88,8 @@ function PixiBoard({
   useEffect(() => {
     let app,
       observer,
-      disposed = false;
+      disposed = false,
+      hoveredId = null;
     const start = async () => {
       app = new Application();
       await app.init({
@@ -123,6 +124,22 @@ function PixiBoard({
           };
         window.addEventListener("pointermove", move);
         window.addEventListener("pointerup", up, { once: true });
+      };
+      const selectOnClick = (model, event) => {
+        const start = { x: event.clientX, y: event.clientY };
+        let moved = false;
+        const move = (e) => {
+          moved ||= Math.hypot(e.clientX - start.x, e.clientY - start.y) > 4;
+        };
+        window.addEventListener("pointermove", move);
+        window.addEventListener(
+          "pointerup",
+          () => {
+            window.removeEventListener("pointermove", move);
+            if (!moved) state.current.onSelect([model.id]);
+          },
+          { once: true },
+        );
       };
       const turn = (model, event) => {
         const box = app.canvas.getBoundingClientRect(),
@@ -325,15 +342,32 @@ function PixiBoard({
               y - Math.cos(radians) * radius * 0.82,
             )
             .stroke({ color: 0x17251b, width: Math.max(2, radius * 0.13) });
+          if (hoveredId === model.id)
+            g.circle(x, y, radius + 4).stroke({
+              color: 0xe9e3d7,
+              alpha: 0.6,
+              width: 3,
+            });
           if (s.selected.includes(model.id))
             g.circle(x, y, radius + 6).stroke({ color: 0xf0dc88, width: 3 });
           g.eventMode = "static";
           g.cursor = "pointer";
+          g.on("pointerover", () => {
+            hoveredId = model.id;
+            draw();
+          });
+          g.on("pointerout", () => {
+            if (hoveredId !== model.id) return;
+            hoveredId = null;
+            draw();
+          });
           g.on("pointerdown", (e) => {
             e.stopPropagation();
-            s.onSelect([model.id]);
             if (e.button === 2) turn(model, e.nativeEvent);
-            else if (e.button === 0) drag(model, e.nativeEvent);
+            else if (e.button === 0) {
+              if (s.selected.includes(model.id)) drag(model, e.nativeEvent);
+              else selectOnClick(model, e.nativeEvent);
+            }
           });
           app.stage.addChild(g);
           const label = new Text({

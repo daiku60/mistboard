@@ -119,6 +119,7 @@ h1 {
   pointer-events: none;
 }
 footer {
+  height: 36px;
   font-size: 12px;
   color: #abc1ae;
 }
