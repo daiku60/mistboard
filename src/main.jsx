@@ -113,14 +113,33 @@ function PixiBoard({
         };
       };
       const drag = (model, event) => {
+        const originals = state.current.models.filter((entry) =>
+          state.current.selected.includes(entry.id),
+        );
         let latest = { x: model.x, y: model.y };
+        const moveGroup = (target) => {
+          const requestedX = target.x - model.x,
+            requestedY = target.y - model.y,
+            minX = Math.max(...originals.map((entry) => 2 - entry.x)),
+            maxX = Math.min(...originals.map((entry) => 98 - entry.x)),
+            minY = Math.max(...originals.map((entry) => 2 - entry.y)),
+            maxY = Math.min(...originals.map((entry) => 98 - entry.y)),
+            xOffset = clamp(requestedX, minX, maxX),
+            yOffset = clamp(requestedY, minY, maxY);
+          originals.forEach((entry) =>
+            state.current.onMove(entry.id, {
+              x: entry.x + xOffset,
+              y: entry.y + yOffset,
+            }),
+          );
+        };
         const move = (e) => {
             latest = point(e);
-            state.current.onMove(model.id, latest);
+            moveGroup(latest);
           },
           up = () => {
             window.removeEventListener("pointermove", move);
-            state.current.onMove(model.id, latest);
+            moveGroup(latest);
           };
         window.addEventListener("pointermove", move);
         window.addEventListener("pointerup", up, { once: true });
