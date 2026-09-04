@@ -52,12 +52,14 @@ function CircleSelect({ disabled, values, onChange }) {
 function PixiBoard({
   models,
   selected,
+  selectionBox,
   circles,
   chargeId,
   measuring,
   ruler,
   zoom,
   onSelect,
+  onSelectionBox,
   onMove,
   onRotate,
   onMeasure,
@@ -68,12 +70,14 @@ function PixiBoard({
     ...state.current,
     models,
     selected,
+    selectionBox,
     circles,
     chargeId,
     measuring,
     ruler,
     zoom,
     onSelect,
+    onSelectionBox,
     onMove,
     onRotate,
     onMeasure,
@@ -157,6 +161,37 @@ function PixiBoard({
           { once: true },
         );
       };
+      const selectArea = (event) => {
+        const start = point(event);
+        const move = (e) =>
+          state.current.onSelectionBox({ start, end: point(e) });
+        state.current.onSelectionBox({ start, end: start });
+        window.addEventListener("pointermove", move);
+        window.addEventListener(
+          "pointerup",
+          (e) => {
+            window.removeEventListener("pointermove", move);
+            const end = point(e);
+            const minX = Math.min(start.x, end.x),
+              maxX = Math.max(start.x, end.x),
+              minY = Math.min(start.y, end.y),
+              maxY = Math.max(start.y, end.y);
+            state.current.onSelectionBox(null);
+            state.current.onSelect(
+              state.current.models
+                .filter(
+                  (model) =>
+                    model.x >= minX &&
+                    model.x <= maxX &&
+                    model.y >= minY &&
+                    model.y <= maxY,
+                )
+                .map((model) => model.id),
+            );
+          },
+          { once: true },
+        );
+      };
       const draw = () => {
         if (!app || disposed) return;
         const s = state.current,
@@ -177,14 +212,14 @@ function PixiBoard({
             measure(e.nativeEvent);
             return;
           }
-          if (e.button === 2 && s.selected) {
-            const model = s.models.find((m) => m.id === s.selected);
+          if (e.button === 2 && s.selected.length === 1) {
+            const model = s.models.find((m) => m.id === s.selected[0]);
             if (model) turn(model, e.nativeEvent);
             return;
           }
           if (e.button === 0) {
-            s.onSelect(null);
             s.onMeasure(null);
+            selectArea(e.nativeEvent);
           }
         });
         const grid = add(new Graphics());
@@ -193,6 +228,19 @@ function PixiBoard({
           grid.moveTo(v, 0).lineTo(v, side).moveTo(0, v).lineTo(side, v);
         }
         grid.stroke({ color: 0x436d54, alpha: 0.55, width: 1 });
+        if (s.selectionBox) {
+          const { start, end } = s.selectionBox;
+          const x = px(Math.min(start.x, end.x)),
+            y = px(Math.min(start.y, end.y)),
+            width = px(Math.abs(end.x - start.x)),
+            height = px(Math.abs(end.y - start.y));
+          add(
+            new Graphics()
+              .rect(x, y, width, height)
+              .fill({ color: 0xf0dc88, alpha: 0.12 })
+              .stroke({ color: 0xf0dc88, alpha: 0.9, width: 1 }),
+          );
+        }
         const charge = s.models.find((m) => m.id === s.chargeId);
         if (charge) {
           const points = chargeLanePoints(charge, 10).flatMap((p) => [
@@ -277,13 +325,13 @@ function PixiBoard({
               y - Math.cos(radians) * radius * 0.82,
             )
             .stroke({ color: 0x17251b, width: Math.max(2, radius * 0.13) });
-          if (s.selected === model.id)
+          if (s.selected.includes(model.id))
             g.circle(x, y, radius + 6).stroke({ color: 0xf0dc88, width: 3 });
           g.eventMode = "static";
           g.cursor = "pointer";
           g.on("pointerdown", (e) => {
             e.stopPropagation();
-            s.onSelect(model.id);
+            s.onSelect([model.id]);
             if (e.button === 2) turn(model, e.nativeEvent);
             else if (e.button === 0) drag(model, e.nativeEvent);
           });
@@ -325,14 +373,16 @@ function PixiBoard({
 
 function App() {
   const [models, setModels] = useState([]),
-    [selected, setSelected] = useState(null),
+    [selected, setSelected] = useState([]),
+    [selectionBox, setSelectionBox] = useState(null),
     [circles, setCircles] = useState({}),
     [zoom, setZoom] = useState(1),
     [measuring, setMeasuring] = useState(false),
     [ruler, setRuler] = useState(null),
     [chargeId, setChargeId] = useState(null),
     sock = useRef();
-  const model = models.find((m) => m.id === selected),
+  const selectedModels = models.filter((m) => selected.includes(m.id)),
+    model = selectedModels.length === 1 ? selectedModels[0] : null,
     send = (message) =>
       sock.current?.readyState === 1 &&
       sock.current.send(JSON.stringify(message));
@@ -370,7 +420,17 @@ function App() {
       send({ type: "rotate", id, rotation });
     },
     rotate = (amount) =>
-      model && turn(model.id, ((model.rotation || 0) + amount + 360) % 360);
+      selectedModels.forEach((entry) =>
+        turn(entry.id, ((entry.rotation || 0) + amount + 360) % 360),
+      ),
+    moveSelection = (direction, step) =>
+      selectedModels.forEach((entry) => {
+        const rotation = ((entry.rotation || 0) * Math.PI) / 180;
+        move(entry.id, {
+          x: clamp(entry.x + Math.sin(rotation) * step * direction, 2, 98),
+          y: clamp(entry.y - Math.cos(rotation) * step * direction, 2, 98),
+        });
+      });
   useEffect(() => {
     const key = (e) => {
       if (e.key.toLowerCase() === "c" && model) {
@@ -378,27 +438,18 @@ function App() {
         e.preventDefault();
         return;
       }
-      if (!model) return;
-      const step = ((e.shiftKey ? 0.5 : 1) / BOARD_INCHES) * 100,
-        r = ((model.rotation || 0) * Math.PI) / 180;
+      if (!selectedModels.length) return;
+      const step = ((e.shiftKey ? 0.5 : 1) / BOARD_INCHES) * 100;
       if (e.key === "ArrowLeft") rotate(-15);
       else if (e.key === "ArrowRight") rotate(15);
-      else if (e.key === "ArrowUp")
-        move(model.id, {
-          x: clamp(model.x + Math.sin(r) * step, 2, 98),
-          y: clamp(model.y - Math.cos(r) * step, 2, 98),
-        });
-      else if (e.key === "ArrowDown")
-        move(model.id, {
-          x: clamp(model.x - Math.sin(r) * step, 2, 98),
-          y: clamp(model.y + Math.cos(r) * step, 2, 98),
-        });
+      else if (e.key === "ArrowUp") moveSelection(1, step);
+      else if (e.key === "ArrowDown") moveSelection(-1, step);
       else return;
       e.preventDefault();
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
-  }, [model, models]);
+  }, [model, selectedModels]);
   const values = model ? circles[model.id] || [] : [];
   return (
     <main>
@@ -446,15 +497,17 @@ function App() {
         <PixiBoard
           models={models}
           selected={selected}
+          selectionBox={selectionBox}
           circles={circles}
           chargeId={chargeId}
           measuring={measuring}
           ruler={ruler}
           zoom={zoom}
-          onSelect={(id) => {
-            setSelected(id);
-            if (!id) setRuler(null);
+          onSelect={(ids) => {
+            setSelected(ids);
+            if (!ids.length) setRuler(null);
           }}
+          onSelectionBox={setSelectionBox}
           onMove={move}
           onRotate={turn}
           onMeasure={(next) => {
@@ -486,6 +539,11 @@ function App() {
               <button onClick={() => rotate(15)}>↷</button>
             </span>
           </>
+        ) : selectedModels.length ? (
+          <span>
+            Selected: {selectedModels.length} models · Arrow keys move or rotate
+            all
+          </span>
         ) : (
           "Select a model"
         )}
