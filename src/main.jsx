@@ -430,6 +430,14 @@ function App() {
           x: clamp(entry.x + Math.sin(rotation) * step * direction, 2, 98),
           y: clamp(entry.y - Math.cos(rotation) * step * direction, 2, 98),
         });
+      }),
+    moveBoardRelative = (xDirection, yDirection) =>
+      selectedModels.forEach((entry) => {
+        const step = (0.25 / BOARD_INCHES) * 100;
+        move(entry.id, {
+          x: clamp(entry.x + xDirection * step, 2, 98),
+          y: clamp(entry.y + yDirection * step, 2, 98),
+        });
       });
   useEffect(() => {
     const key = (e) => {
@@ -439,8 +447,12 @@ function App() {
         return;
       }
       if (!selectedModels.length) return;
-      const step = ((e.shiftKey ? 0.5 : 1) / BOARD_INCHES) * 100;
-      if (e.key === "ArrowLeft") rotate(-15);
+      const step = (1 / BOARD_INCHES) * 100;
+      if (e.shiftKey && e.key === "ArrowLeft") moveBoardRelative(-1, 0);
+      else if (e.shiftKey && e.key === "ArrowRight") moveBoardRelative(1, 0);
+      else if (e.shiftKey && e.key === "ArrowUp") moveBoardRelative(0, -1);
+      else if (e.shiftKey && e.key === "ArrowDown") moveBoardRelative(0, 1);
+      else if (e.key === "ArrowLeft") rotate(-15);
       else if (e.key === "ArrowRight") rotate(15);
       else if (e.key === "ArrowUp") moveSelection(1, step);
       else if (e.key === "ArrowDown") moveSelection(-1, step);
