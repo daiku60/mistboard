@@ -304,6 +304,7 @@ export function createMistboardServer({
     response.writeHead(200, {
       "content-type":
         MIME_TYPES[extname(filePath)] ?? "application/octet-stream",
+      "cache-control": "no-store",
     });
     const file = createReadStream(filePath);
     file.on("error", () => response.end());

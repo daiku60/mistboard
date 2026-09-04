@@ -62,7 +62,11 @@ function PixiBoard({
   ruler,
   zoom,
   zoomOrigin,
+  pan,
+  spacePressed,
   onZoom,
+  onPanStart,
+  onPan,
   onSelect,
   onSelectionBox,
   onPreviewMove,
@@ -88,7 +92,11 @@ function PixiBoard({
     ruler,
     zoom,
     zoomOrigin,
+    pan,
+    spacePressed,
     onZoom,
+    onPanStart,
+    onPan,
     onSelect,
     onSelectionBox,
     onPreviewMove,
@@ -105,6 +113,11 @@ function PixiBoard({
     let app,
       observer,
       wheel,
+      spaceDown,
+      spaceUp,
+      clearSpace,
+      panPointerDown,
+      spaceHeld = false,
       disposed = false,
       hoveredId = null;
     const start = async () => {
@@ -145,6 +158,32 @@ function PixiBoard({
         );
       };
       app.canvas.addEventListener("wheel", wheel, { passive: false });
+      const isSpaceKey = (event) =>
+        event.code === "Space" || event.key === " " || event.key === "Spacebar";
+      const setCanvasCursor = (cursor) =>
+        app.canvas.style.setProperty("cursor", cursor, "important");
+      spaceDown = (event) => {
+        if (!isSpaceKey(event)) return;
+        spaceHeld = true;
+        app.canvas.classList.add("space-panning");
+        setCanvasCursor("grab");
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      };
+      spaceUp = (event) => {
+        if (!isSpaceKey(event)) return;
+        spaceHeld = false;
+        app.canvas.classList.remove("space-panning", "panning");
+        setCanvasCursor("default");
+      };
+      clearSpace = () => {
+        spaceHeld = false;
+        app.canvas.classList.remove("space-panning", "panning");
+        setCanvasCursor("default");
+      };
+      window.addEventListener("keydown", spaceDown, { capture: true });
+      window.addEventListener("keyup", spaceUp);
+      window.addEventListener("blur", clearSpace);
       const point = (e) => {
         const box = app.canvas.getBoundingClientRect();
         return {
@@ -261,6 +300,36 @@ function PixiBoard({
           { once: true },
         );
       };
+      const pan = (event) => {
+        const start = { x: event.clientX, y: event.clientY };
+        state.current.onPanStart();
+        app.canvas.classList.add("panning");
+        setCanvasCursor("grabbing");
+        const move = (e) =>
+          state.current.onPan({
+            x: e.clientX - start.x,
+            y: e.clientY - start.y,
+          });
+        window.addEventListener("pointermove", move);
+        window.addEventListener(
+          "pointerup",
+          () => {
+            window.removeEventListener("pointermove", move);
+            app.canvas.classList.remove("panning");
+            setCanvasCursor(spaceHeld ? "grab" : "default");
+          },
+          { once: true },
+        );
+      };
+      panPointerDown = (event) => {
+        if (!spaceHeld || event.button !== 0) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        pan(event);
+      };
+      app.canvas.addEventListener("pointerdown", panPointerDown, {
+        capture: true,
+      });
       const selectArea = (event) => {
         const start = point(event);
         const move = (e) =>
@@ -337,8 +406,16 @@ function PixiBoard({
           new Graphics().rect(0, 0, side, side).fill(0x789e78),
         );
         background.eventMode = "static";
-        background.cursor = s.measuring ? "crosshair" : "default";
+        background.cursor = spaceHeld
+          ? "grab"
+          : s.measuring
+            ? "crosshair"
+            : "default";
         background.on("pointerdown", (e) => {
+          if (e.button === 0 && spaceHeld) {
+            pan(e.nativeEvent);
+            return;
+          }
           if (s.measuring) {
             measure(e.nativeEvent);
             return;
@@ -604,6 +681,12 @@ function PixiBoard({
     return () => {
       disposed = true;
       app?.canvas?.removeEventListener("wheel", wheel);
+      app?.canvas?.removeEventListener("pointerdown", panPointerDown, {
+        capture: true,
+      });
+      window.removeEventListener("keydown", spaceDown, { capture: true });
+      window.removeEventListener("keyup", spaceUp);
+      window.removeEventListener("blur", clearSpace);
       observer?.disconnect();
       app?.destroy(true, { children: true });
     };
@@ -613,7 +696,7 @@ function PixiBoard({
       ref={host}
       className={`board-canvas ${measuring ? "measuring" : ""}`}
       style={{
-        transform: `scale(${zoom})`,
+        transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
         transformOrigin: `${zoomOrigin.x}% ${zoomOrigin.y}%`,
       }}
     />
@@ -629,13 +712,16 @@ function App() {
     [circles, setCircles] = useState({}),
     [zoom, setZoom] = useState(1),
     [zoomOrigin, setZoomOrigin] = useState({ x: 50, y: 50 }),
+    [pan, setPan] = useState({ x: 0, y: 0 }),
+    [spacePressed, setSpacePressed] = useState(false),
     [measuring, setMeasuring] = useState(false),
     [ruler, setRuler] = useState(null),
     [chargeIds, setChargeIds] = useState([]),
     [rotationCharges, setRotationCharges] = useState([]),
     sock = useRef(),
     clientId = useRef(null),
-    history = useRef({ past: [], future: [] });
+    history = useRef({ past: [], future: [] }),
+    panStart = useRef({ x: 0, y: 0 });
   const selectedModels = models.filter((m) => selected.includes(m.id)),
     model = selectedModels.length === 1 ? selectedModels[0] : null,
     send = (message) =>
@@ -739,6 +825,11 @@ function App() {
     };
   useEffect(() => {
     const key = (e) => {
+      if (e.code === "Space") {
+        setSpacePressed(true);
+        e.preventDefault();
+        return;
+      }
       const primaryModifier = e.metaKey || e.ctrlKey;
       if (primaryModifier && e.key.toLowerCase() === "z") {
         const previous = history.current.past.pop();
@@ -863,6 +954,13 @@ function App() {
     selected,
     selectedModels,
   ]);
+  useEffect(() => {
+    const releaseSpace = (e) => {
+      if (e.code === "Space") setSpacePressed(false);
+    };
+    window.addEventListener("keyup", releaseSpace);
+    return () => window.removeEventListener("keyup", releaseSpace);
+  }, []);
   const values = model ? circles[model.id] || [] : [];
   return (
     <main>
@@ -887,7 +985,14 @@ function App() {
           >
             +
           </button>
-          <button className="control" onClick={() => setZoom(1)}>
+          <button
+            className="control"
+            onClick={() => {
+              setZoom(1);
+              setZoomOrigin({ x: 50, y: 50 });
+              setPan({ x: 0, y: 0 });
+            }}
+          >
             Reset view
           </button>
           <button
@@ -921,10 +1026,21 @@ function App() {
           ruler={ruler}
           zoom={zoom}
           zoomOrigin={zoomOrigin}
+          pan={pan}
+          spacePressed={spacePressed}
           onZoom={(delta, origin) => {
             setZoomOrigin(origin);
             setZoom((value) => clamp(value + delta, 0.6, 2.5));
           }}
+          onPanStart={() => {
+            panStart.current = pan;
+          }}
+          onPan={(offset) =>
+            setPan({
+              x: panStart.current.x + offset.x,
+              y: panStart.current.y + offset.y,
+            })
+          }
           onSelect={(ids) => {
             setSelected(ids);
             if (!ids.length) setRuler(null);

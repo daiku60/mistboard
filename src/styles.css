@@ -194,6 +194,12 @@ footer {
   height: 100%;
   touch-action: none;
 }
+.pixi-canvas.space-panning {
+  cursor: grab !important;
+}
+.pixi-canvas.panning {
+  cursor: grabbing !important;
+}
 .board-canvas.measuring .pixi-canvas {
   cursor: crosshair;
 }
