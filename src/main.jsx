@@ -102,6 +102,7 @@ function PixiBoard({
         app.destroy();
         return;
       }
+      app.stage.sortableChildren = true;
       host.current.appendChild(app.canvas);
       app.canvas.className = "pixi-canvas";
       app.canvas.addEventListener("contextmenu", (e) => e.preventDefault());
@@ -314,12 +315,12 @@ function PixiBoard({
             const x = px(model.x),
               y = px(model.y),
               radius = inches(range + baseDiameterInches(model) / 2);
-            add(
-              new Graphics()
-                .circle(x, y, radius)
-                .fill({ color: 0xf0dc88, alpha: 0.11 })
-                .stroke({ color: 0xf0dc88, width: 2 }),
-            );
+            const circle = new Graphics()
+              .circle(x, y, radius)
+              .fill({ color: 0xf0dc88, alpha: 0.11 })
+              .stroke({ color: 0xf0dc88, width: 2 });
+            circle.zIndex = 10;
+            add(circle);
             const label = new Text({
               text: `${range}″`,
               style: {
@@ -331,17 +332,18 @@ function PixiBoard({
             });
             label.anchor.set(0.5);
             label.position.set(x, y - radius + 10);
-            add(
-              new Graphics()
-                .roundRect(
-                  x - label.width / 2 - 4,
-                  y - radius + 2,
-                  label.width + 8,
-                  label.height + 4,
-                  3,
-                )
-                .fill({ color: 0x17251b, alpha: 0.88 }),
-            );
+            label.zIndex = 12;
+            const labelBackground = new Graphics()
+              .roundRect(
+                x - label.width / 2 - 4,
+                y - radius + 2,
+                label.width + 8,
+                label.height + 4,
+                3,
+              )
+              .fill({ color: 0x17251b, alpha: 0.7 });
+            labelBackground.zIndex = 11;
+            add(labelBackground);
             app.stage.addChild(label);
           });
         });
@@ -520,6 +522,23 @@ function App() {
       });
   useEffect(() => {
     const key = (e) => {
+      if (e.ctrlKey && e.key === "." && model) {
+        setCircles((current) => ({ ...current, [model.id]: [] }));
+        e.preventDefault();
+        return;
+      }
+      if (e.ctrlKey && model && /^[0-9]$/.test(e.key)) {
+        const digit = Number(e.key);
+        const range = e.altKey ? (digit || 10) + 10 : digit || 10;
+        setCircles((current) => {
+          const ranges = current[model.id] || [];
+          return ranges.includes(range)
+            ? current
+            : { ...current, [model.id]: [...ranges, range] };
+        });
+        e.preventDefault();
+        return;
+      }
       if (e.key.toLowerCase() === "c" && model) {
         setChargeId((id) => (id === model.id ? null : model.id));
         e.preventDefault();
