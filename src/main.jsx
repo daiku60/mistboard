@@ -336,12 +336,6 @@ function PixiBoard({
             .fill(model.color)
             .stroke({ color: 0xeeeeee, width: 3 });
           const radians = ((model.rotation || 0) * Math.PI) / 180;
-          g.moveTo(x, y)
-            .lineTo(
-              x + Math.sin(radians) * radius * 0.82,
-              y - Math.cos(radians) * radius * 0.82,
-            )
-            .stroke({ color: 0x17251b, width: Math.max(2, radius * 0.13) });
           if (hoveredId === model.id)
             g.circle(x, y, radius + 4).stroke({
               color: 0xe9e3d7,
@@ -350,6 +344,30 @@ function PixiBoard({
             });
           if (s.selected.includes(model.id))
             g.circle(x, y, radius + 6).stroke({ color: 0xf0dc88, width: 3 });
+          if (hoveredId === model.id || s.selected.includes(model.id)) {
+            const forward = { x: Math.sin(radians), y: -Math.cos(radians) },
+              sideways = { x: Math.cos(radians), y: Math.sin(radians) },
+              tip = {
+                x: x + forward.x * (radius + 9),
+                y: y + forward.y * (radius + 9),
+              },
+              baseCenter = {
+                x: x + forward.x * (radius + 2),
+                y: y + forward.y * (radius + 2),
+              },
+              halfWidth = Math.max(3, radius * 0.25);
+            g.poly(
+              [
+                tip.x,
+                tip.y,
+                baseCenter.x + sideways.x * halfWidth,
+                baseCenter.y + sideways.y * halfWidth,
+                baseCenter.x - sideways.x * halfWidth,
+                baseCenter.y - sideways.y * halfWidth,
+              ],
+              true,
+            ).fill(0x17251b);
+          }
           g.eventMode = "static";
           g.cursor = "pointer";
           g.on("pointerover", () => {
