@@ -209,6 +209,23 @@ function PixiBoard({
           { once: true },
         );
       };
+      const updateHover = (event) => {
+        const pointer = point(event);
+        const hit = [...state.current.models].reverse().find((model) => {
+          const radius = (baseDiameterInches(model) / 2 / BOARD_INCHES) * 100;
+          return Math.hypot(model.x - pointer.x, model.y - pointer.y) <= radius;
+        });
+        const nextHoveredId = hit?.id ?? null;
+        if (hoveredId === nextHoveredId) return;
+        hoveredId = nextHoveredId;
+        draw();
+      };
+      app.canvas.addEventListener("pointermove", updateHover);
+      app.canvas.addEventListener("pointerleave", () => {
+        if (!hoveredId) return;
+        hoveredId = null;
+        draw();
+      });
       const draw = () => {
         if (!app || disposed) return;
         const s = state.current,
@@ -370,15 +387,6 @@ function PixiBoard({
           }
           g.eventMode = "static";
           g.cursor = "pointer";
-          g.on("pointerover", () => {
-            hoveredId = model.id;
-            draw();
-          });
-          g.on("pointerout", () => {
-            if (hoveredId !== model.id) return;
-            hoveredId = null;
-            draw();
-          });
           g.on("pointerdown", (e) => {
             e.stopPropagation();
             if (e.button === 2) turn(model, e.nativeEvent);
